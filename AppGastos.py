@@ -1,7 +1,6 @@
 import streamlit as st
 import gspread
 from google import genai
-from google.genai import types  # <- AGREGA ESTA LÍNEA
 import time
 import json
 import os
@@ -48,34 +47,6 @@ def clasificar_gasto(comercio):
     
     Responde ÚNICAMENTE con el nombre exacto de la categoría. No uses comillas.
     """
-    try:
-        response = cliente_ai.models.generate_content(
-            model='gemini-3.6-pro',
-            contents=prompt
-        )
-        return response.text.strip()
-    except Exception as e:
-        return "Comida"
-
-def clasificar_gasto(comercio):
-    prompt = f"""
-    Actúa como un categorizador financiero automático.
-    Comercio recibido: '{comercio}'
-    
-    Elige estrictamente una de las siguientes categorías para ese comercio:
-    {', '.join(CATEGORIAS_PERMITIDAS)}
-    
-    Instrucciones obligatorias:
-    1. Si el texto dice o contiene "farmacia", devuelve SIEMPRE 'Farmacia (n)'.
-    2. Si contiene "oxxo", devuelve 'OXXO'.
-    3. Si contiene "cine", devuelve 'Cine (s)'.
-    4. Si contiene "gasolina" o "gas", devuelve 'Gasolina (n)'.
-    5. Si contiene "super", "walmart", "heb", devuelve 'Super (n)'.
-    6. Aplica el sentido común para el resto.
-    7. SOLO si el texto es totalmente irreconocible, devuelve 'Comida'.
-    
-    Responde ÚNICAMENTE con el nombre exacto de la categoría. No uses comillas.
-    """
     for intento in range(3):
         try:
             response = cliente_ai.models.generate_content(
@@ -84,12 +55,86 @@ def clasificar_gasto(comercio):
             )
             return response.text.strip()
         except Exception as e:
-            # Si Gemini nos frena por límite de velocidad, esperamos y reintentamos
             if "429" in str(e) or "503" in str(e):
                 time.sleep(5)
                 continue
             return "Comida"
     return "Comida"
+
+def extraer_gastos_de_documento(archivo_bytes, mime_type, instrucciones=""):
+    """Usa Gemini mediante la File API con espera de procesamiento activa"""
+    prompt = """
+    Analiza este estado de cuenta o ticket. Extrae todos los gastos y devuélvelos en formato JSON estricto.
+    El JSON debe ser una lista de diccionarios con las llaves: "fecha" (formato DD/MM/YY), "comercio" (nombre limpio), "monto" (solo número sin símbolos).
+    Ignora depósitos, pagos de tarjeta o abonos, solo quiero los gastos/compras.
+    """
+    
+    if instrucciones:
+        prompt += f"\nINSTRUCCIONES MUY IMPORTANTES DEL USUARIO: {instrucciones}\nDebes cumplir estas instrucciones estrictamente al filtrar o procesar los datos."
+        
+    prompt += '\nEjemplo de salida esperada: [{"fecha": "23/09/26", "comercio": "Starbucks", "monto": 150}]'
+    
+    ext = ".pdf" if "pdf" in mime_type else ".jpg"
+    with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as temp_file:
+        temp_file.write(archivo_bytes)
+        temp_path = temp_file.name
+
+    try:
+        archivo_gemini = cliente_ai.files.upload(file=temp_path)
+        
+        mensaje_espera = st.empty()
+        mensaje_espera.info("Documento subido. Esperando a que Google termine de prepararlo...")
+        
+        while True:
+            archivo_gemini = cliente_ai.files.get(name=archivo_gemini.name)
+            estado = str(archivo_gemini.state).upper()
+            
+            if "ACTIVE" in estado:
+                mensaje_espera.success("¡Documento listo! Analizando gastos...")
+                break
+            elif "FAILED" in estado:
+                mensaje_espera.error("Google falló al intentar leer este archivo.")
+                return []
+                
+            time.sleep(2) 
+            
+        max_reintentos = 3
+        resultado = []
+        
+        for intento in range(max_reintentos):
+            try:
+                response = cliente_ai.models.generate_content(
+                    model='gemini-3.6-flash',
+                    contents=[archivo_gemini, prompt]
+                )
+                texto_json = response.text.replace("```json", "").replace("```", "").strip()
+                resultado = json.loads(texto_json)
+                break
+                
+            except Exception as e:
+                error_msg = str(e)
+                if "503" in error_msg or "UNAVAILABLE" in error_msg:
+                    if intento < max_reintentos - 1:
+                        time.sleep(5)
+                        continue
+                st.error(f"Error en la IA: {error_msg}")
+                break
+        
+        try:
+            cliente_ai.files.delete(name=archivo_gemini.name)
+        except:
+            pass
+            
+        mensaje_espera.empty() 
+        return resultado
+        
+    except Exception as e:
+        st.error(f"Error general: {e}")
+        return []
+        
+    finally:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
 
 def procesar_pendientes():
     registros = hoja_recepcion.get_all_values()
@@ -122,7 +167,6 @@ def procesar_pendientes():
                 fila_destino = 3 + len([v for v in valores_mes if v])
                 
                 if fila_destino <= 38:
-                    # BATCH UPDATE: Escribe las 3 celdas en un solo movimiento (ahorra límite de Sheets)
                     hoja_visual.update(
                         values=[[categoria, fecha_str, monto]],
                         range_name=f"{col_letra}{fila_destino}"
@@ -130,7 +174,6 @@ def procesar_pendientes():
                     hoja_recepcion.update_cell(index, 4, "Listo")
                     procesados += 1
             
-            # Freno de 4 segundos obligatorio para no saturar el límite de 15 peticiones/min de Gemini
             time.sleep(4) 
             
         progress_bar.progress(min((index - 1) / (len(registros) - 1), 1.0))

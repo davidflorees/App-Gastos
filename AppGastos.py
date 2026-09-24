@@ -56,7 +56,7 @@ def clasificar_gasto(comercio):
         return "Comida"
 
 def extraer_gastos_de_documento(archivo_bytes, mime_type, instrucciones=""):
-    """Usa Gemini para leer imágenes o PDFs con instrucciones personalizadas"""
+    """Usa Gemini para leer imágenes o PDFs con instrucciones personalizadas y reintentos automáticos"""
     prompt = """
     Analiza este estado de cuenta o ticket. Extrae todos los gastos y devuélvelos en formato JSON estricto.
     El JSON debe ser una lista de diccionarios con las llaves: "fecha" (formato DD/MM/YY), "comercio" (nombre limpio), "monto" (solo número sin símbolos).
@@ -68,19 +68,34 @@ def extraer_gastos_de_documento(archivo_bytes, mime_type, instrucciones=""):
         
     prompt += '\nEjemplo de salida esperada: [{"fecha": "23/09/26", "comercio": "Starbucks", "monto": 150}]'
     
-    try:
-        response = cliente_ai.models.generate_content(
-            model='gemini-3.6-flash',
-            contents=[
-                types.Part.from_bytes(data=archivo_bytes, mime_type=mime_type),
-                prompt
-            ]
-        )
-        texto_json = response.text.replace("```json", "").replace("```", "").strip()
-        return json.loads(texto_json)
-    except Exception as e:
-        st.error(f"Error al analizar documento: {e}")
-        return []
+    max_reintentos = 3
+    
+    for intento in range(max_reintentos):
+        try:
+            response = cliente_ai.models.generate_content(
+                model='gemini-3.6-flash',
+                contents=[
+                    types.Part.from_bytes(data=archivo_bytes, mime_type=mime_type),
+                    prompt
+                ]
+            )
+            texto_json = response.text.replace("```json", "").replace("```", "").strip()
+            return json.loads(texto_json)
+            
+        except Exception as e:
+            error_msg = str(e)
+            # Si es error 503 y aún nos quedan intentos, esperamos y reintentamos
+            if "503" in error_msg or "UNAVAILABLE" in error_msg:
+                if intento < max_reintentos - 1:
+                    st.warning(f"Servidores de Google ocupados. Reintentando automáticamente en 5 segundos... (Intento {intento + 1} de {max_reintentos})")
+                    time.sleep(5)
+                    continue # Vuelve al inicio del for
+            
+            # Si es otro tipo de error, o si ya agotamos los intentos
+            st.error(f"Error al analizar documento: {error_msg}")
+            return []
+            
+    return []
 
 def procesar_pendientes():
     registros = hoja_recepcion.get_all_values()

@@ -58,7 +58,7 @@ def clasificar_gasto(comercio):
         return "Comida"
 
 def extraer_gastos_de_documento(archivo_bytes, mime_type, instrucciones=""):
-    """Usa Gemini para leer imágenes o PDFs mediante la File API oficial"""
+    """Usa Gemini mediante la File API con reintentos automáticos para evadir bloqueos 503"""
     prompt = """
     Analiza este estado de cuenta o ticket. Extrae todos los gastos y devuélvelos en formato JSON estricto.
     El JSON debe ser una lista de diccionarios con las llaves: "fecha" (formato DD/MM/YY), "comercio" (nombre limpio), "monto" (solo número sin símbolos).
@@ -70,30 +70,44 @@ def extraer_gastos_de_documento(archivo_bytes, mime_type, instrucciones=""):
         
     prompt += '\nEjemplo de salida esperada: [{"fecha": "23/09/26", "comercio": "Starbucks", "monto": 150}]'
     
-    # Determinar la extensión correcta para el archivo temporal
+    # 1. Crear el archivo físico temporal
     ext = ".pdf" if "pdf" in mime_type else ".jpg"
-    
-    # 1. Crear un archivo físico temporal en el servidor
     with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as temp_file:
         temp_file.write(archivo_bytes)
         temp_path = temp_file.name
 
     try:
-        # 2. Subir el archivo formalmente usando la API de archivos de Google
+        # 2. Subir el documento formalmente a Google
         archivo_gemini = cliente_ai.files.upload(file=temp_path)
         
-        # 3. Analizar con el modelo más actual
-        response = cliente_ai.models.generate_content(
-            model='gemini-3.6-flash',
-            contents=[
-                archivo_gemini,
-                prompt
-            ]
-        )
-        texto_json = response.text.replace("```json", "").replace("```", "").strip()
-        resultado = json.loads(texto_json)
+        # 3. Bucle de reintentos contra el error 503
+        max_reintentos = 4
+        resultado = []
         
-        # 4. Borrar el archivo de los servidores de Google por privacidad
+        for intento in range(max_reintentos):
+            try:
+                response = cliente_ai.models.generate_content(
+                    model='gemini-3.6-flash',
+                    contents=[archivo_gemini, prompt]
+                )
+                texto_json = response.text.replace("```json", "").replace("```", "").strip()
+                resultado = json.loads(texto_json)
+                break  # Éxito: rompemos el ciclo
+                
+            except Exception as e:
+                error_msg = str(e)
+                if "503" in error_msg or "UNAVAILABLE" in error_msg:
+                    if intento < max_reintentos - 1:
+                        tiempo_espera = 10 * (intento + 1)
+                        st.warning(f"Servidores de Google saturados. Reintentando en {tiempo_espera}s... (Intento {intento + 1} de {max_reintentos})")
+                        time.sleep(tiempo_espera)
+                        continue
+                
+                # Si es otro error o se acaban los intentos
+                st.error(f"Error en la respuesta de la IA: {error_msg}")
+                break
+        
+        # 4. Limpiar el documento de la nube de Google por seguridad
         try:
             cliente_ai.files.delete(name=archivo_gemini.name)
         except:
@@ -102,11 +116,11 @@ def extraer_gastos_de_documento(archivo_bytes, mime_type, instrucciones=""):
         return resultado
         
     except Exception as e:
-        st.error(f"Error al analizar documento: {e}")
+        st.error(f"Error al subir el documento: {e}")
         return []
         
     finally:
-        # 5. Borrar el archivo temporal local de Streamlit
+        # 5. Borrar el archivo temporal de tu servidor de Streamlit
         if os.path.exists(temp_path):
             os.remove(temp_path)
 

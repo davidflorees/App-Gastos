@@ -10,11 +10,9 @@ from datetime import datetime
 # --- CONFIGURACIÓN INICIAL ---
 st.set_page_config(page_title="Gestor de Gastos", page_icon="💸", layout="centered")
 
-# Cargar secretos de Streamlit
 GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
 cliente_ai = genai.Client(api_key=GEMINI_API_KEY)
 
-# Conexión a Google Sheets usando el diccionario de secretos de Streamlit
 gc = gspread.service_account_from_dict(st.secrets["gcp_service_account"])
 archivo = gc.open("Gastos")
 hoja_recepcion = archivo.worksheet("Apple Pay")
@@ -27,38 +25,6 @@ CATEGORIAS_PERMITIDAS = [
 ]
 
 # --- FUNCIONES NÚCLEO ---
-
-def clasificar_gasto(comercio):
-    prompt = f"""
-    Actúa como un categorizador financiero automático.
-    Comercio recibido: '{comercio}'
-    
-    Elige estrictamente una de las siguientes categorías para ese comercio:
-    {', '.join(CATEGORIAS_PERMITIDAS)}
-    
-    Instrucciones obligatorias:
-    1. Si el texto dice o contiene "farmacia", devuelve SIEMPRE 'Farmacia (n)'.
-    2. Si contiene "oxxo", devuelve 'OXXO'.
-    3. Si contiene "cine", devuelve 'Cine (s)'.
-    4. Si contiene "gasolina" o "gas", devuelve 'Gasolina (n)'.
-    5. Si contiene "super", "walmart", "heb", devuelve 'Super (n)'.
-    6. Aplica el sentido común para el resto.
-    7. SOLO si el texto es totalmente irreconocible, devuelve 'Comida'.
-    
-    Responde ÚNICAMENTE con el nombre exacto de la categoría. No uses comillas.
-    """
-    for intento in range(3):
-        try:
-            response = cliente_ai.models.generate_content(
-                model='gemini-3.6-flash',
-                contents=prompt
-            )
-            return response.text.strip()
-        except Exception as e:
-            if "429" in str(e) or "503" in str(e):
-                time.sleep(30) # <- CAMBIO: Esperar medio minuto si Google nos frena
-                continue
-            return "Comida"
 
 def extraer_gastos_de_documento(archivo_bytes, mime_type, instrucciones=""):
     """Usa Gemini mediante la File API con espera de procesamiento activa"""
@@ -114,7 +80,7 @@ def extraer_gastos_de_documento(archivo_bytes, mime_type, instrucciones=""):
                 error_msg = str(e)
                 if "503" in error_msg or "UNAVAILABLE" in error_msg or "429" in error_msg:
                     if intento < max_reintentos - 1:
-                        time.sleep(30) # <- CAMBIO: Misma pausa de seguridad
+                        time.sleep(30)
                         continue
                 st.error(f"Error en la IA: {error_msg}")
                 break
@@ -135,47 +101,109 @@ def extraer_gastos_de_documento(archivo_bytes, mime_type, instrucciones=""):
         if os.path.exists(temp_path):
             os.remove(temp_path)
 
+def clasificar_gastos_en_lote(lista_comercios):
+    """Envía todos los comercios en una sola petición para evitar límites de velocidad."""
+    prompt = f"""
+    Actúa como un categorizador financiero automático.
+    Clasifica esta lista de comercios asignando a cada uno estrictamente una de las siguientes categorías:
+    {', '.join(CATEGORIAS_PERMITIDAS)}
+    
+    Instrucciones obligatorias:
+    1. Si el texto dice o contiene "farmacia", devuelve 'Farmacia (n)'.
+    2. Si contiene "oxxo", devuelve 'OXXO'.
+    3. Si contiene "cine", devuelve 'Cine (s)'.
+    4. Si contiene "gasolina" o "gas", devuelve 'Gasolina (n)'.
+    5. Si contiene "super", "walmart", "heb", devuelve 'Super (n)'.
+    6. Aplica el sentido común para el resto.
+    7. SOLO si el texto es totalmente irreconocible, devuelve 'Comida'.
+    
+    Comercios a clasificar:
+    {json.dumps(lista_comercios)}
+    
+    Responde ÚNICAMENTE con un arreglo JSON válido, donde cada objeto tenga las llaves "comercio" y "categoria".
+    Ejemplo de salida:
+    [
+        {{"comercio": "Oxxo Naranjos", "categoria": "OXXO"}},
+        {{"comercio": "Uber Eats", "categoria": "Comida"}}
+    ]
+    """
+    try:
+        response = cliente_ai.models.generate_content(
+            model='gemini-3.6-flash',
+            contents=prompt
+        )
+        texto_json = response.text.replace("```json", "").replace("```", "").strip()
+        return json.loads(texto_json)
+    except Exception as e:
+        st.error(f"Error al clasificar el lote: {e}")
+        return []
+
 def procesar_pendientes():
     registros = hoja_recepcion.get_all_values()
-    procesados = 0
     
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-
+    # 1. Agrupar todos los gastos pendientes
+    filas_a_procesar = []
     for index, fila in enumerate(registros[1:], start=2):
         if len(fila) < 4 or fila[3] != "Listo":
-            if not fila[0] or not fila[1]:
-                continue
+            if fila[0] and fila[1]:
+                filas_a_procesar.append({
+                    "index": index,
+                    "fecha": fila[0],
+                    "comercio": fila[1],
+                    "monto": fila[2]
+                })
                 
-            fecha_str, comercio, monto = fila[0], fila[1], fila[2]
-            status_text.text(f"Clasificando: {comercio}...")
+    if not filas_a_procesar:
+        return 0
+
+    status_text = st.empty()
+    status_text.info(f"Enviando un paquete de {len(filas_a_procesar)} gastos a la IA...")
+    
+    # 2. Enviar a la IA en una sola llamada
+    nombres_comercios = [item["comercio"] for item in filas_a_procesar]
+    resultados_ia = clasificar_gastos_en_lote(nombres_comercios)
+    
+    # Convertir respuesta de la IA en un diccionario rápido { "Oxxo": "OXXO", "Uber": "Comida" }
+    mapa_categorias = {r.get("comercio", ""): r.get("categoria", "Comida") for r in resultados_ia}
+    
+    procesados = 0
+    progress_bar = st.progress(0)
+    
+    # 3. Acomodar los resultados en Google Sheets
+    for i, item in enumerate(filas_a_procesar):
+        comercio = item["comercio"]
+        categoria = mapa_categorias.get(comercio, "Comida")
+        
+        # Validar que la categoría de la IA exista en tu lista
+        if categoria not in CATEGORIAS_PERMITIDAS:
+            categoria = "Comida"
             
-            categoria = clasificar_gasto(comercio)
+        status_text.text(f"Acomodando en matriz visual: {comercio} -> {categoria}")
+        
+        try:
+            mes = int(item["fecha"].split('-')[1]) if '-' in item["fecha"] else int(item["fecha"].split('/')[1])
+        except:
+            continue
             
-            try:
-                mes = int(fecha_str.split('-')[1]) if '-' in fecha_str else int(fecha_str.split('/')[1])
-            except:
-                continue
-                
-            columnas_mes = {1: 1, 2: 4, 3: 7, 4: 10, 5: 13, 6: 16, 7: 19, 8: 22, 9: 25, 10: 28, 11: 31, 12: 34}
-            col_inicial = columnas_mes.get(mes)
+        columnas_mes = {1: 1, 2: 4, 3: 7, 4: 10, 5: 13, 6: 16, 7: 19, 8: 22, 9: 25, 10: 28, 11: 31, 12: 34}
+        col_inicial = columnas_mes.get(mes)
+        
+        if col_inicial:
+            col_letra = gspread.utils.rowcol_to_a1(1, col_inicial)[0]
+            valores_mes = hoja_visual.get(f"{col_letra}3:{col_letra}38")
+            fila_destino = 3 + len([v for v in valores_mes if v])
             
-            if col_inicial:
-                col_letra = gspread.utils.rowcol_to_a1(1, col_inicial)[0]
-                valores_mes = hoja_visual.get(f"{col_letra}3:{col_letra}38")
-                fila_destino = 3 + len([v for v in valores_mes if v])
-                
-                if fila_destino <= 38:
-                    hoja_visual.update(
-                        values=[[categoria, fecha_str, monto]],
-                        range_name=f"{col_letra}{fila_destino}"
-                    )
-                    hoja_recepcion.update_cell(index, 4, "Listo")
-                    procesados += 1
-            
-            time.sleep(4) 
-            
-        progress_bar.progress(min((index - 1) / (len(registros) - 1), 1.0))
+            if fila_destino <= 38:
+                hoja_visual.update(
+                    values=[[categoria, item["fecha"], item["monto"]]],
+                    range_name=f"{col_letra}{fila_destino}"
+                )
+                hoja_recepcion.update_cell(item["index"], 4, "Listo")
+                procesados += 1
+        
+        # Freno minúsculo de 1 segundo exclusivamente para no saturar Google Sheets
+        time.sleep(1)
+        progress_bar.progress(min((i + 1) / len(filas_a_procesar), 1.0))
         
     status_text.text("¡Procesamiento finalizado!")
     return procesados
@@ -239,7 +267,7 @@ with tab2:
 # Pestaña 3: Ejecutar y Acomodar
 with tab3:
     st.subheader("Acomodar gastos pendientes")
-    st.write("Presiona este botón para que la IA clasifique todos los gastos de la fila de espera y los acomode en el panel visual del 2026.")
+    st.write("Presiona este botón para que la IA clasifique todos los gastos de la fila de espera en un solo bloque.")
     
     if st.button("🚀 Procesar Todo Ahora", type="primary"):
         with st.spinner("Despertando a la IA y acomodando celdas..."):

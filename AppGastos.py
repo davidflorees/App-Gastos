@@ -56,10 +56,9 @@ def clasificar_gasto(comercio):
             return response.text.strip()
         except Exception as e:
             if "429" in str(e) or "503" in str(e):
-                time.sleep(7)
+                time.sleep(30) # <- CAMBIO: Esperar medio minuto si Google nos frena
                 continue
             return "Comida"
-    return "Comida"
 
 def extraer_gastos_de_documento(archivo_bytes, mime_type, instrucciones=""):
     """Usa Gemini mediante la File API con espera de procesamiento activa"""

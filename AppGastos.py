@@ -58,7 +58,7 @@ def clasificar_gasto(comercio):
         return "Comida"
 
 def extraer_gastos_de_documento(archivo_bytes, mime_type, instrucciones=""):
-    """Usa Gemini mediante la File API con reintentos automáticos para evadir bloqueos 503"""
+    """Usa Gemini mediante la File API con espera de procesamiento activa"""
     prompt = """
     Analiza este estado de cuenta o ticket. Extrae todos los gastos y devuélvelos en formato JSON estricto.
     El JSON debe ser una lista de diccionarios con las llaves: "fecha" (formato DD/MM/YY), "comercio" (nombre limpio), "monto" (solo número sin símbolos).
@@ -70,18 +70,34 @@ def extraer_gastos_de_documento(archivo_bytes, mime_type, instrucciones=""):
         
     prompt += '\nEjemplo de salida esperada: [{"fecha": "23/09/26", "comercio": "Starbucks", "monto": 150}]'
     
-    # 1. Crear el archivo físico temporal
     ext = ".pdf" if "pdf" in mime_type else ".jpg"
     with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as temp_file:
         temp_file.write(archivo_bytes)
         temp_path = temp_file.name
 
     try:
-        # 2. Subir el documento formalmente a Google
+        # 1. Subir el documento a la nube temporal de Google
         archivo_gemini = cliente_ai.files.upload(file=temp_path)
         
-        # 3. Bucle de reintentos contra el error 503
-        max_reintentos = 4
+        # 2. EL SECRETO: Esperar a que el archivo cambie a estado "ACTIVE"
+        mensaje_espera = st.empty()
+        mensaje_espera.info("Documento subido. Esperando a que Google termine de prepararlo...")
+        
+        while True:
+            archivo_gemini = cliente_ai.files.get(name=archivo_gemini.name)
+            estado = str(archivo_gemini.state).upper()
+            
+            if "ACTIVE" in estado:
+                mensaje_espera.success("¡Documento listo! Analizando gastos...")
+                break
+            elif "FAILED" in estado:
+                mensaje_espera.error("Google falló al intentar leer este archivo.")
+                return []
+                
+            time.sleep(2) # Esperar 2 segundos antes de volver a preguntar
+            
+        # 3. Analizar con el modelo (ya con el documento 100% listo)
+        max_reintentos = 3
         resultado = []
         
         for intento in range(max_reintentos):
@@ -92,38 +108,34 @@ def extraer_gastos_de_documento(archivo_bytes, mime_type, instrucciones=""):
                 )
                 texto_json = response.text.replace("```json", "").replace("```", "").strip()
                 resultado = json.loads(texto_json)
-                break  # Éxito: rompemos el ciclo
+                break
                 
             except Exception as e:
                 error_msg = str(e)
                 if "503" in error_msg or "UNAVAILABLE" in error_msg:
                     if intento < max_reintentos - 1:
-                        tiempo_espera = 10 * (intento + 1)
-                        st.warning(f"Servidores de Google saturados. Reintentando en {tiempo_espera}s... (Intento {intento + 1} de {max_reintentos})")
-                        time.sleep(tiempo_espera)
+                        time.sleep(5)
                         continue
-                
-                # Si es otro error o se acaban los intentos
-                st.error(f"Error en la respuesta de la IA: {error_msg}")
+                st.error(f"Error en la IA: {error_msg}")
                 break
         
-        # 4. Limpiar el documento de la nube de Google por seguridad
+        # 4. Limpiar el documento de la nube de Google
         try:
             cliente_ai.files.delete(name=archivo_gemini.name)
         except:
             pass
             
+        mensaje_espera.empty() # Borrar los mensajes temporales
         return resultado
         
     except Exception as e:
-        st.error(f"Error al subir el documento: {e}")
+        st.error(f"Error general: {e}")
         return []
         
     finally:
-        # 5. Borrar el archivo temporal de tu servidor de Streamlit
+        # 5. Borrar el archivo local de Streamlit
         if os.path.exists(temp_path):
             os.remove(temp_path)
-
 def procesar_pendientes():
     registros = hoja_recepcion.get_all_values()
     procesados = 0

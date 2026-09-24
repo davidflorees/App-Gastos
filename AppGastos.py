@@ -18,16 +18,16 @@ archivo = gc.open("Gastos")
 hoja_recepcion = archivo.worksheet("Apple Pay")
 hoja_visual = archivo.worksheet("2026")
 
+# Lista limpia y simplificada de categorías
 CATEGORIAS_PERMITIDAS = [
-    "OXXO", "Comida", "Cafetería (s)", "Farmacia (n)", 
-    "Gasolina (n)", "Super (n)", "Cine (s)", "Flores",
-    "Comida (s)", "Comida (n)", "Corte (n)", "Helado (s)", "Regalo"
+    "OXXO", "Comida", "Cafetería", "Farmacia", 
+    "Gasolina", "Super", "Cine", "Helado"
 ]
 
 # --- FUNCIONES NÚCLEO ---
 
 def extraer_gastos_de_documento(archivo_bytes, mime_type, instrucciones=""):
-    """Usa Gemini mediante la File API con espera de procesamiento activa"""
+    """Usa Gemini mediante la File API con espera de procesamiento activa y el modelo Lite"""
     prompt = """
     Analiza este estado de cuenta o ticket. Extrae todos los gastos y devuélvelos en formato JSON estricto.
     El JSON debe ser una lista de diccionarios con las llaves: "fecha" (formato DD/MM/YY), "comercio" (nombre limpio), "monto" (solo número sin símbolos).
@@ -69,7 +69,7 @@ def extraer_gastos_de_documento(archivo_bytes, mime_type, instrucciones=""):
         for intento in range(max_reintentos):
             try:
                 response = cliente_ai.models.generate_content(
-                    model='gemini-3.5-flash-lite',
+                    model='gemini-3.5-flash-lite', # Modelo ligero con 500 peticiones diarias
                     contents=[archivo_gemini, prompt]
                 )
                 texto_json = response.text.replace("```json", "").replace("```", "").strip()
@@ -105,17 +105,16 @@ def clasificar_gastos_en_lote(lista_comercios):
     """Envía todos los comercios en una sola petición para evitar límites de velocidad."""
     prompt = f"""
     Actúa como un categorizador financiero automático.
-    Clasifica esta lista de comercios asignando a cada uno estrictamente una de las siguientes categorías:
+    Clasifica esta lista de comercios intentando asignar a cada uno una de estas categorías principales:
     {', '.join(CATEGORIAS_PERMITIDAS)}
     
     Instrucciones obligatorias:
-    1. Si el texto dice o contiene "farmacia", devuelve 'Farmacia (n)'.
+    1. Si el texto dice o contiene "farmacia", devuelve 'Farmacia'.
     2. Si contiene "oxxo", devuelve 'OXXO'.
-    3. Si contiene "cine", devuelve 'Cine (s)'.
-    4. Si contiene "gasolina" o "gas", devuelve 'Gasolina (n)'.
-    5. Si contiene "super", "walmart", "heb", devuelve 'Super (n)'.
-    6. Aplica el sentido común para el resto.
-    7. SOLO si el texto es totalmente irreconocible, devuelve 'Comida'.
+    3. Si contiene "cine", devuelve 'Cine'.
+    4. Si contiene "gasolina" o "gas", devuelve 'Gasolina'.
+    5. Si contiene "super", "walmart", "heb", devuelve 'Super'.
+    6. REGLA DE ORO: Si el comercio no encaja claramente en ninguna de las categorías de arriba, devuelve el NOMBRE ORIGINAL del comercio tal cual como te lo envié. NO pongas 'Comida' por defecto.
     
     Comercios a clasificar:
     {json.dumps(lista_comercios)}
@@ -124,12 +123,12 @@ def clasificar_gastos_en_lote(lista_comercios):
     Ejemplo de salida:
     [
         {{"comercio": "Oxxo Naranjos", "categoria": "OXXO"}},
-        {{"comercio": "Uber Eats", "categoria": "Comida"}}
+        {{"comercio": "Zara", "categoria": "Zara"}}
     ]
     """
     try:
         response = cliente_ai.models.generate_content(
-            model='gemini-3.5-flash-lite',
+            model='gemini-3.5-flash-lite', # Modelo ligero con 500 peticiones diarias
             contents=prompt
         )
         texto_json = response.text.replace("```json", "").replace("```", "").strip()
@@ -141,7 +140,6 @@ def clasificar_gastos_en_lote(lista_comercios):
 def procesar_pendientes():
     registros = hoja_recepcion.get_all_values()
     
-    # 1. Agrupar todos los gastos pendientes
     filas_a_procesar = []
     for index, fila in enumerate(registros[1:], start=2):
         if len(fila) < 4 or fila[3] != "Listo":
@@ -159,25 +157,20 @@ def procesar_pendientes():
     status_text = st.empty()
     status_text.info(f"Enviando un paquete de {len(filas_a_procesar)} gastos a la IA...")
     
-    # 2. Enviar a la IA en una sola llamada
     nombres_comercios = [item["comercio"] for item in filas_a_procesar]
     resultados_ia = clasificar_gastos_en_lote(nombres_comercios)
     
-    # Convertir respuesta de la IA en un diccionario rápido { "Oxxo": "OXXO", "Uber": "Comida" }
-    mapa_categorias = {r.get("comercio", ""): r.get("categoria", "Comida") for r in resultados_ia}
+    # Mapeo: Si la IA falla en clasificar, usa el nombre del comercio original.
+    mapa_categorias = {r.get("comercio", ""): r.get("categoria", r.get("comercio", "")) for r in resultados_ia}
     
     procesados = 0
     progress_bar = st.progress(0)
     
-    # 3. Acomodar los resultados en Google Sheets
     for i, item in enumerate(filas_a_procesar):
         comercio = item["comercio"]
-        categoria = mapa_categorias.get(comercio, "Comida")
+        # Tomar la categoría de la IA, si no existe en el mapa, usar el nombre original
+        categoria = mapa_categorias.get(comercio, comercio)
         
-        # Validar que la categoría de la IA exista en tu lista
-        if categoria not in CATEGORIAS_PERMITIDAS:
-            categoria = "Comida"
-            
         status_text.text(f"Acomodando en matriz visual: {comercio} -> {categoria}")
         
         try:
@@ -201,7 +194,7 @@ def procesar_pendientes():
                 hoja_recepcion.update_cell(item["index"], 4, "Listo")
                 procesados += 1
         
-        # Freno minúsculo de 1 segundo exclusivamente para no saturar Google Sheets
+        # Freno exclusivo para respetar los límites de la API de Google Sheets
         time.sleep(1)
         progress_bar.progress(min((i + 1) / len(filas_a_procesar), 1.0))
         
@@ -214,7 +207,6 @@ st.title("💸 Mi Panel Financiero")
 
 tab1, tab2, tab3 = st.tabs(["✍️ Ingreso Manual", "📄 Subir Documento", "🚀 Ejecutar Ahora"])
 
-# Pestaña 1: Ingreso Manual
 with tab1:
     st.subheader("Agregar un gasto rápido")
     with st.form("manual_form"):
@@ -229,7 +221,6 @@ with tab1:
             hoja_recepcion.append_row([fecha_formateada, comercio_input, str(monto_input)])
             st.success(f"Guardado: {comercio_input} por ${monto_input}")
 
-# Pestaña 2: Subir PDF o Imagen
 with tab2:
     st.subheader("Extraer desde Ticket o Estado de Cuenta")
     st.info("Sube una foto de un ticket o un PDF de tu banco.")
@@ -264,7 +255,6 @@ with tab2:
                 else:
                     st.warning("No se encontraron gastos o no coincidieron con tus instrucciones.")
 
-# Pestaña 3: Ejecutar y Acomodar
 with tab3:
     st.subheader("Acomodar gastos pendientes")
     st.write("Presiona este botón para que la IA clasifique todos los gastos de la fila de espera en un solo bloque.")

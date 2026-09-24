@@ -69,33 +69,32 @@ def extraer_gastos_de_documento(archivo_bytes, mime_type, instrucciones=""):
     prompt += '\nEjemplo de salida esperada: [{"fecha": "23/09/26", "comercio": "Starbucks", "monto": 150}]'
     
     max_reintentos = 3
-    
-    for intento in range(max_reintentos):
-        try:
-            response = cliente_ai.models.generate_content(
-                model='gemini-3.6-flash',
-                contents=[
-                    types.Part.from_bytes(data=archivo_bytes, mime_type=mime_type),
-                    prompt
-                ]
-            )
-            texto_json = response.text.replace("```json", "").replace("```", "").strip()
-            return json.loads(texto_json)
-            
-        except Exception as e:
-            error_msg = str(e)
-            # Si es error 503 y aún nos quedan intentos, esperamos y reintentamos
-            if "503" in error_msg or "UNAVAILABLE" in error_msg:
-                if intento < max_reintentos - 1:
-                    st.warning(f"Servidores de Google ocupados. Reintentando automáticamente en 5 segundos... (Intento {intento + 1} de {max_reintentos})")
-                    time.sleep(5)
-                    continue # Vuelve al inicio del for
-            
-            # Si es otro tipo de error, o si ya agotamos los intentos
-            st.error(f"Error al analizar documento: {error_msg}")
-            return []
-            
-    return []
+        
+        for intento in range(max_reintentos):
+            try:
+                response = cliente_ai.models.generate_content(
+                    model='gemini-2.5-flash',  # Cambiamos a la versión más estable y con menos tráfico
+                    contents=[
+                        types.Part.from_bytes(data=archivo_bytes, mime_type=mime_type),
+                        prompt
+                    ]
+                )
+                texto_json = response.text.replace("```json", "").replace("```", "").strip()
+                return json.loads(texto_json)
+                
+            except Exception as e:
+                error_msg = str(e)
+                if "503" in error_msg or "UNAVAILABLE" in error_msg:
+                    if intento < max_reintentos - 1:
+                        tiempo_espera = 10 * (intento + 1)  # Esperará 10s en el primer fallo, 20s en el segundo
+                        st.warning(f"Servidor ocupado. Reintentando en {tiempo_espera} segundos... (Intento {intento + 1} de {max_reintentos})")
+                        time.sleep(tiempo_espera)
+                        continue
+                
+                st.error(f"Error al analizar documento: {error_msg}")
+                return []
+                
+        return []
 
 def procesar_pendientes():
     registros = hoja_recepcion.get_all_values()

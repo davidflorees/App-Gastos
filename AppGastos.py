@@ -69,18 +69,18 @@ def extraer_gastos_de_documento(archivo_bytes, mime_type, instrucciones=""):
     prompt += '\nEjemplo de salida esperada: [{"fecha": "23/09/26", "comercio": "Starbucks", "monto": 150}]'
     
     try:
-            response = cliente_ai.models.generate_content(
-                model='gemini-3.6-flash',
-                contents=[
-                    types.Part.from_bytes(data=archivo_bytes, mime_type=mime_type), # <- CAMBIO AQUI
-                    prompt
-                ]
-            )
-            texto_json = response.text.replace("```json", "").replace("```", "").strip()
-            return json.loads(texto_json)
-        except Exception as e:
-            st.error(f"Error al analizar documento: {e}")
-            return []
+        response = cliente_ai.models.generate_content(
+            model='gemini-3.6-flash',
+            contents=[
+                types.Part.from_bytes(data=archivo_bytes, mime_type=mime_type),
+                prompt
+            ]
+        )
+        texto_json = response.text.replace("```json", "").replace("```", "").strip()
+        return json.loads(texto_json)
+    except Exception as e:
+        st.error(f"Error al analizar documento: {e}")
+        return []
 
 def procesar_pendientes():
     registros = hoja_recepcion.get_all_values()

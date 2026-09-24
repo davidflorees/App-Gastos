@@ -70,32 +70,31 @@ def extraer_gastos_de_documento(archivo_bytes, mime_type, instrucciones=""):
     
     max_reintentos = 3
         
-        for intento in range(max_reintentos):
-            try:
-                response = cliente_ai.models.generate_content(
-                    model='gemini-2.5-flash',  # Cambiamos a la versión más estable y con menos tráfico
-                    contents=[
-                        types.Part.from_bytes(data=archivo_bytes, mime_type=mime_type),
-                        prompt
-                    ]
-                )
-                texto_json = response.text.replace("```json", "").replace("```", "").strip()
-                return json.loads(texto_json)
-                
-            except Exception as e:
-                error_msg = str(e)
-                if "503" in error_msg or "UNAVAILABLE" in error_msg:
-                    if intento < max_reintentos - 1:
-                        tiempo_espera = 10 * (intento + 1)  # Esperará 10s en el primer fallo, 20s en el segundo
-                        st.warning(f"Servidor ocupado. Reintentando en {tiempo_espera} segundos... (Intento {intento + 1} de {max_reintentos})")
-                        time.sleep(tiempo_espera)
-                        continue
-                
-                st.error(f"Error al analizar documento: {error_msg}")
-                return []
-                
-        return []
-
+    for intento in range(max_reintentos):
+        try:
+            response = cliente_ai.models.generate_content(
+                model='gemini-2.5-flash',  # Cambiamos a la versión más estable y con menos tráfico
+                contents=[
+                    types.Part.from_bytes(data=archivo_bytes, mime_type=mime_type),
+                    prompt
+                ]
+            )
+            texto_json = response.text.replace("```json", "").replace("```", "").strip()
+            return json.loads(texto_json)
+            
+        except Exception as e:
+            error_msg = str(e)
+            if "503" in error_msg or "UNAVAILABLE" in error_msg:
+                if intento < max_reintentos - 1:
+                    tiempo_espera = 10 * (intento + 1)  # Esperará 10s en el primer fallo, 20s en el segundo
+                    st.warning(f"Servidor ocupado. Reintentando en {tiempo_espera} segundos... (Intento {intento + 1} de {max_reintentos})")
+                    time.sleep(tiempo_espera)
+                    continue
+            
+            st.error(f"Error al analizar documento: {error_msg}")
+            return []
+            
+    return []
 
 def procesar_pendientes():
     registros = hoja_recepcion.get_all_values()

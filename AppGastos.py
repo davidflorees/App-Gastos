@@ -112,10 +112,9 @@ def extraer_gastos_de_documento(archivo_bytes, mime_type, instrucciones=""):
                 
             except Exception as e:
                 error_msg = str(e)
-                # Agregamos el "429" a la lista de errores que deben esperar
                 if "503" in error_msg or "UNAVAILABLE" in error_msg or "429" in error_msg:
                     if intento < max_reintentos - 1:
-                        time.sleep(15) # Pausa larga para darle respiro a Google
+                        time.sleep(30) # <- CAMBIO: Misma pausa de seguridad
                         continue
                 st.error(f"Error en la IA: {error_msg}")
                 break

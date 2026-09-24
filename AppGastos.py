@@ -48,7 +48,7 @@ def clasificar_gasto(comercio):
     """
     try:
         response = cliente_ai.models.generate_content(
-            model='gemini-3.6-flash',
+            model='gemini-3.6-pro',
             contents=prompt
         )
         return response.text.strip()

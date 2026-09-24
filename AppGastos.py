@@ -57,85 +57,40 @@ def clasificar_gasto(comercio):
     except Exception as e:
         return "Comida"
 
-def extraer_gastos_de_documento(archivo_bytes, mime_type, instrucciones=""):
-    """Usa Gemini mediante la File API con espera de procesamiento activa"""
-    prompt = """
-    Analiza este estado de cuenta o ticket. Extrae todos los gastos y devuélvelos en formato JSON estricto.
-    El JSON debe ser una lista de diccionarios con las llaves: "fecha" (formato DD/MM/YY), "comercio" (nombre limpio), "monto" (solo número sin símbolos).
-    Ignora depósitos, pagos de tarjeta o abonos, solo quiero los gastos/compras.
+def clasificar_gasto(comercio):
+    prompt = f"""
+    Actúa como un categorizador financiero automático.
+    Comercio recibido: '{comercio}'
+    
+    Elige estrictamente una de las siguientes categorías para ese comercio:
+    {', '.join(CATEGORIAS_PERMITIDAS)}
+    
+    Instrucciones obligatorias:
+    1. Si el texto dice o contiene "farmacia", devuelve SIEMPRE 'Farmacia (n)'.
+    2. Si contiene "oxxo", devuelve 'OXXO'.
+    3. Si contiene "cine", devuelve 'Cine (s)'.
+    4. Si contiene "gasolina" o "gas", devuelve 'Gasolina (n)'.
+    5. Si contiene "super", "walmart", "heb", devuelve 'Super (n)'.
+    6. Aplica el sentido común para el resto.
+    7. SOLO si el texto es totalmente irreconocible, devuelve 'Comida'.
+    
+    Responde ÚNICAMENTE con el nombre exacto de la categoría. No uses comillas.
     """
-    
-    if instrucciones:
-        prompt += f"\nINSTRUCCIONES MUY IMPORTANTES DEL USUARIO: {instrucciones}\nDebes cumplir estas instrucciones estrictamente al filtrar o procesar los datos."
-        
-    prompt += '\nEjemplo de salida esperada: [{"fecha": "23/09/26", "comercio": "Starbucks", "monto": 150}]'
-    
-    ext = ".pdf" if "pdf" in mime_type else ".jpg"
-    with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as temp_file:
-        temp_file.write(archivo_bytes)
-        temp_path = temp_file.name
-
-    try:
-        # 1. Subir el documento a la nube temporal de Google
-        archivo_gemini = cliente_ai.files.upload(file=temp_path)
-        
-        # 2. EL SECRETO: Esperar a que el archivo cambie a estado "ACTIVE"
-        mensaje_espera = st.empty()
-        mensaje_espera.info("Documento subido. Esperando a que Google termine de prepararlo...")
-        
-        while True:
-            archivo_gemini = cliente_ai.files.get(name=archivo_gemini.name)
-            estado = str(archivo_gemini.state).upper()
-            
-            if "ACTIVE" in estado:
-                mensaje_espera.success("¡Documento listo! Analizando gastos...")
-                break
-            elif "FAILED" in estado:
-                mensaje_espera.error("Google falló al intentar leer este archivo.")
-                return []
-                
-            time.sleep(2) # Esperar 2 segundos antes de volver a preguntar
-            
-        # 3. Analizar con el modelo (ya con el documento 100% listo)
-        max_reintentos = 3
-        resultado = []
-        
-        for intento in range(max_reintentos):
-            try:
-                response = cliente_ai.models.generate_content(
-                    model='gemini-3.6-flash',
-                    contents=[archivo_gemini, prompt]
-                )
-                texto_json = response.text.replace("```json", "").replace("```", "").strip()
-                resultado = json.loads(texto_json)
-                break
-                
-            except Exception as e:
-                error_msg = str(e)
-                if "503" in error_msg or "UNAVAILABLE" in error_msg:
-                    if intento < max_reintentos - 1:
-                        time.sleep(5)
-                        continue
-                st.error(f"Error en la IA: {error_msg}")
-                break
-        
-        # 4. Limpiar el documento de la nube de Google
+    for intento in range(3):
         try:
-            cliente_ai.files.delete(name=archivo_gemini.name)
-        except:
-            pass
-            
-        mensaje_espera.empty() # Borrar los mensajes temporales
-        return resultado
-        
-    except Exception as e:
-        st.error(f"Error general: {e}")
-        return []
-        
-    finally:
-        # 5. Borrar el archivo local de Streamlit
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
+            response = cliente_ai.models.generate_content(
+                model='gemini-3.6-flash',
+                contents=prompt
+            )
+            return response.text.strip()
+        except Exception as e:
+            # Si Gemini nos frena por límite de velocidad, esperamos y reintentamos
+            if "429" in str(e) or "503" in str(e):
+                time.sleep(5)
+                continue
+            return "Comida"
+    return "Comida"
+
 def procesar_pendientes():
     registros = hoja_recepcion.get_all_values()
     procesados = 0
@@ -149,7 +104,7 @@ def procesar_pendientes():
                 continue
                 
             fecha_str, comercio, monto = fila[0], fila[1], fila[2]
-            status_text.text(f"Procesando: {comercio}...")
+            status_text.text(f"Clasificando: {comercio}...")
             
             categoria = clasificar_gasto(comercio)
             
@@ -158,7 +113,6 @@ def procesar_pendientes():
             except:
                 continue
                 
-            # Mapeo alineado a tu diseño visual (Julio=19, Agosto=22, Sept=25...)
             columnas_mes = {1: 1, 2: 4, 3: 7, 4: 10, 5: 13, 6: 16, 7: 19, 8: 22, 9: 25, 10: 28, 11: 31, 12: 34}
             col_inicial = columnas_mes.get(mes)
             
@@ -168,18 +122,21 @@ def procesar_pendientes():
                 fila_destino = 3 + len([v for v in valores_mes if v])
                 
                 if fila_destino <= 38:
-                    hoja_visual.update_cell(fila_destino, col_inicial, categoria)
-                    hoja_visual.update_cell(fila_destino, col_inicial + 1, fecha_str)
-                    hoja_visual.update_cell(fila_destino, col_inicial + 2, monto)
+                    # BATCH UPDATE: Escribe las 3 celdas en un solo movimiento (ahorra límite de Sheets)
+                    hoja_visual.update(
+                        values=[[categoria, fecha_str, monto]],
+                        range_name=f"{col_letra}{fila_destino}"
+                    )
                     hoja_recepcion.update_cell(index, 4, "Listo")
                     procesados += 1
-            time.sleep(1) 
+            
+            # Freno de 4 segundos obligatorio para no saturar el límite de 15 peticiones/min de Gemini
+            time.sleep(4) 
             
         progress_bar.progress(min((index - 1) / (len(registros) - 1), 1.0))
         
     status_text.text("¡Procesamiento finalizado!")
     return procesados
-
 
 # --- INTERFAZ VISUAL ---
 

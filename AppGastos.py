@@ -96,6 +96,7 @@ def extraer_gastos_de_documento(archivo_bytes, mime_type, instrucciones=""):
                 
         return []
 
+
 def procesar_pendientes():
     registros = hoja_recepcion.get_all_values()
     procesados = 0

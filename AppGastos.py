@@ -69,7 +69,7 @@ def extraer_gastos_de_documento(archivo_bytes, mime_type, instrucciones=""):
         for intento in range(max_reintentos):
             try:
                 response = cliente_ai.models.generate_content(
-                    model='gemini-3.6-flash',
+                    model='gemini-3.5-flash-lite',
                     contents=[archivo_gemini, prompt]
                 )
                 texto_json = response.text.replace("```json", "").replace("```", "").strip()

@@ -129,7 +129,7 @@ def clasificar_gastos_en_lote(lista_comercios):
     """
     try:
         response = cliente_ai.models.generate_content(
-            model='gemini-3.6-flash',
+            model='gemini-3.5-flash-lite',
             contents=prompt
         )
         texto_json = response.text.replace("```json", "").replace("```", "").strip()

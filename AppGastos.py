@@ -186,10 +186,10 @@ def procesar_pendientes():
             valores_mes = hoja_visual.get(f"{col_letra}3:{col_letra}38")
             fila_destino = 3 + len([v for v in valores_mes if v])
             
-            # --- NUEVO: Convertir a número limpio ---
+            # --- CORRECCIÓN: Convertir a número súper limpio ---
             try:
-                # Quitamos signos de $ o comas y lo convertimos a decimal
-                monto_limpio = str(item["monto"]).replace("$", "").replace(",", "").strip()
+                # Quitamos signos de $, comas y apóstrofos rebeldes
+                monto_limpio = str(item["monto"]).replace("$", "").replace(",", "").replace("'", "").strip()
                 monto_numerico = float(monto_limpio)
             except ValueError:
                 monto_numerico = item["monto"] # Respaldo por si hay un error extraño
@@ -227,7 +227,11 @@ with tab1:
         
         if submit_btn and comercio_input:
             fecha_formateada = fecha_input.strftime("%d/%m/%y")
-            hoja_recepcion.append_row([fecha_formateada, comercio_input, str(monto_input)])
+            # --- CORRECCIÓN: Guardar el monto_input tal cual es, sin convertirlo a texto ---
+            hoja_recepcion.append_row(
+                [fecha_formateada, comercio_input, monto_input],
+                value_input_option="USER_ENTERED"
+            )
             st.success(f"Guardado: {comercio_input} por ${monto_input}")
 
 with tab2:
@@ -259,7 +263,17 @@ with tab2:
                     st.write(f"Se encontraron y filtraron {len(gastos_extraidos)} gastos:")
                     for g in gastos_extraidos:
                         st.write(f"- {g['fecha']} | {g['comercio']} | ${g['monto']}")
-                        hoja_recepcion.append_row([g['fecha'], g['comercio'], str(g['monto'])])
+                        
+                        # --- CORRECCIÓN: Limpiar el número de la IA antes de guardarlo en recepción ---
+                        try:
+                            monto_limpio = float(str(g['monto']).replace("$", "").replace(",", "").replace("'", "").strip())
+                        except ValueError:
+                            monto_limpio = g['monto']
+                            
+                        hoja_recepcion.append_row(
+                            [g['fecha'], g['comercio'], monto_limpio],
+                            value_input_option="USER_ENTERED"
+                        )
                     st.success("¡Todos los gastos se agregaron a la fila de espera!")
                 else:
                     st.warning("No se encontraron gastos o no coincidieron con tus instrucciones.")

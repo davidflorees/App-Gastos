@@ -186,7 +186,6 @@ def procesar_pendientes():
             valores_mes = hoja_visual.get(f"{col_letra}3:{col_letra}38")
             fila_destino = 3 + len([v for v in valores_mes if v])
             
-            # --- CORRECCIÓN: Convertir a número súper limpio ---
             try:
                 # Quitamos signos de $, comas y apóstrofos rebeldes
                 monto_limpio = str(item["monto"]).replace("$", "").replace(",", "").replace("'", "").strip()
@@ -198,7 +197,7 @@ def procesar_pendientes():
                 hoja_visual.update(
                     values=[[categoria, item["fecha"], monto_numerico]],
                     range_name=f"{col_letra}{fila_destino}",
-                    value_input_option="USER_ENTERED" # <- ESTA ES LA MAGIA
+                    value_input_option="USER_ENTERED" 
                 )
                 hoja_recepcion.update_cell(item["index"], 4, "Listo")
                 procesados += 1
@@ -212,7 +211,93 @@ def procesar_pendientes():
 
 # --- INTERFAZ VISUAL ---
 
-st.title("Mi Panel Financiero")
+# 1. Inyección de CSS (Diseño Tech-Finance: Azul Marino y Verde Esmeralda)
+st.markdown("""
+<style>
+    /* Fondo general */
+    .stApp {
+        background-color: #F8FAFC;
+    }
+    
+    /* Tipografía y encabezados */
+    h1, h2, h3 {
+        color: #0F172A !important;
+        font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        font-weight: 700;
+    }
+    
+    /* Diseño de las Pestañas (Tabs) */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 8px;
+        padding-bottom: 5px;
+    }
+    .stTabs [data-baseweb="tab"] {
+        background-color: #E2E8F0;
+        border-radius: 8px 8px 0px 0px;
+        padding: 12px 24px;
+        color: #475569;
+        font-weight: 600;
+    }
+    .stTabs [aria-selected="true"] {
+        background-color: #1E293B !important; /* Azul marino */
+        color: #FFFFFF !important;
+        border-bottom: 4px solid #10B981 !important; /* Acento verde */
+    }
+    
+    /* Botones primarios */
+    .stButton>button[kind="primary"] {
+        background-color: #10B981;
+        color: white;
+        border-radius: 8px;
+        border: none;
+        font-weight: 700;
+        padding: 0.5rem 1rem;
+        transition: all 0.2s ease-in-out;
+    }
+    .stButton>button[kind="primary"]:hover {
+        background-color: #059669;
+        box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+    }
+    
+    /* Botones secundarios */
+    .stButton>button[kind="secondary"] {
+        border: 2px solid #1E293B;
+        color: #1E293B;
+        border-radius: 8px;
+        font-weight: 600;
+        transition: all 0.2s ease-in-out;
+    }
+    .stButton>button[kind="secondary"]:hover {
+        background-color: #1E293B;
+        color: white;
+    }
+    
+    /* Contenedores y formularios tipo tarjeta */
+    div[data-testid="stForm"] {
+        background-color: #FFFFFF;
+        border-radius: 12px;
+        padding: 24px;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+        border: 1px solid #F1F5F9;
+    }
+    
+    /* Cajas de alerta (Info y Success) */
+    div[data-testid="stInfo"] {
+        background-color: #F0FDFA;
+        border-left: 5px solid #0D9488;
+        color: #115E59;
+    }
+    div[data-testid="stSuccess"] {
+        background-color: #ECFDF5;
+        border-left: 5px solid #10B981;
+        color: #065F46;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# 2. Encabezado principal personalizado
+st.markdown("<h1><span style='color: #10B981;'>💸</span> Mi Panel Financiero</h1>", unsafe_allow_html=True)
+st.markdown("<p style='color: #64748B; font-size: 1.1rem; margin-bottom: 2rem;'>Gestión inteligente con IA y sincronización en tiempo real</p>", unsafe_allow_html=True)
 
 tab1, tab2, tab3 = st.tabs(["✍️ Ingreso Manual", "📄 Subir Documento", "🚀 Ejecutar Ahora"])
 
@@ -227,16 +312,15 @@ with tab1:
         
         if submit_btn and comercio_input:
             fecha_formateada = fecha_input.strftime("%d/%m/%y")
-            # --- CORRECCIÓN: Guardar el monto_input tal cual es, sin convertirlo a texto ---
             hoja_recepcion.append_row(
                 [fecha_formateada, comercio_input, monto_input],
                 value_input_option="USER_ENTERED"
             )
-            st.success(f"Guardado: {comercio_input} por ${monto_input}")
+            st.success(f"Guardado exitosamente: {comercio_input} por ${monto_input}")
 
 with tab2:
     st.subheader("Extraer desde Ticket o Estado de Cuenta")
-    st.info("Sube una foto de un ticket o un PDF de tu banco.")
+    st.info("Sube una foto de un ticket o un PDF de tu banco. La inteligencia artificial extraerá y filtrará los datos automáticamente.")
     
     archivo_subido = st.file_uploader("Sube tu archivo", type=["pdf", "png", "jpg", "jpeg"])
     
@@ -246,7 +330,7 @@ with tab2:
     )
     
     if archivo_subido is not None:
-        if st.button("Analizar Documento"):
+        if st.button("Analizar Documento", type="primary"):
             with st.spinner("La IA está leyendo y filtrando el documento..."):
                 bytes_data = archivo_subido.getvalue()
                 
@@ -260,11 +344,10 @@ with tab2:
                 gastos_extraidos = extraer_gastos_de_documento(bytes_data, mime, instrucciones_usuario)
                 
                 if gastos_extraidos:
-                    st.write(f"Se encontraron y filtraron {len(gastos_extraidos)} gastos:")
+                    st.write(f"**Se encontraron y filtraron {len(gastos_extraidos)} gastos:**")
                     for g in gastos_extraidos:
-                        st.write(f"- {g['fecha']} | {g['comercio']} | ${g['monto']}")
+                        st.write(f"- 📅 {g['fecha']} | 🏢 {g['comercio']} | 💵 ${g['monto']}")
                         
-                        # --- CORRECCIÓN: Limpiar el número de la IA antes de guardarlo en recepción ---
                         try:
                             monto_limpio = float(str(g['monto']).replace("$", "").replace(",", "").replace("'", "").strip())
                         except ValueError:
@@ -274,19 +357,19 @@ with tab2:
                             [g['fecha'], g['comercio'], monto_limpio],
                             value_input_option="USER_ENTERED"
                         )
-                    st.success("¡Todos los gastos se agregaron a la fila de espera!")
+                    st.success("¡Todos los gastos se agregaron a la fila de espera correctamente!")
                 else:
                     st.warning("No se encontraron gastos o no coincidieron con tus instrucciones.")
 
 with tab3:
     st.subheader("Acomodar gastos pendientes")
-    st.write("Presiona este botón para que la IA clasifique todos los gastos de la fila de espera en un solo bloque.")
+    st.write("Presiona este botón para que la IA clasifique todos los gastos de la fila de espera en un solo bloque y los envíe a tu matriz de Google Sheets.")
     
     if st.button("🚀 Procesar Todo Ahora", type="primary"):
-        with st.spinner("Despertando a la IA y acomodando celdas..."):
+        with st.spinner("Despertando a la IA y acomodando celdas en el panel visual..."):
             total = procesar_pendientes()
             if total > 0:
                 st.success(f"¡Listo! Se clasificaron y acomodaron {total} gastos exitosamente.")
                 st.balloons()
             else:
-                st.info("No hay gastos nuevos por procesar.")
+                st.info("No hay gastos nuevos por procesar en la fila de espera.")

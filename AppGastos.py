@@ -18,7 +18,6 @@ archivo = gc.open("Gastos")
 hoja_recepcion = archivo.worksheet("Apple Pay")
 hoja_visual = archivo.worksheet("2026")
 
-# Lista limpia y simplificada de categorías
 CATEGORIAS_PERMITIDAS = [
     "OXXO", "Comida", "Cafetería", "Farmacia", 
     "Gasolina", "Super", "Cine", "Helado"
@@ -26,8 +25,37 @@ CATEGORIAS_PERMITIDAS = [
 
 # --- FUNCIONES NÚCLEO ---
 
+def limpiar_monto(valor):
+    """
+    Convierte cualquier formato de moneda (con comas, puntos, signos $) 
+    a un número matemático puro para que Google Sheets lo pueda sumar.
+    """
+    if isinstance(valor, (int, float)):
+        return float(valor)
+        
+    texto = str(valor).replace("$", "").replace("'", "").replace(" ", "").strip()
+    
+    # Caso 1: Tiene comas y puntos (ej. 1,000.50 o 1.000,50)
+    if "," in texto and "." in texto:
+        if texto.rfind(",") > texto.rfind("."):
+            texto = texto.replace(".", "").replace(",", ".")
+        else:
+            texto = texto.replace(",", "")
+            
+    # Caso 2: Solo tiene coma (ej. 150,50 o 1,500)
+    elif "," in texto:
+        partes = texto.split(",")
+        if len(partes[-1]) in [1, 2]: 
+            texto = texto.replace(",", ".")
+        else:
+            texto = texto.replace(",", "")
+            
+    try:
+        return float(texto)
+    except ValueError:
+        return valor
+
 def extraer_gastos_de_documento(archivo_bytes, mime_type, instrucciones=""):
-    """Usa Gemini mediante la File API con espera de procesamiento activa y el modelo Lite"""
     prompt = """
     Analiza este estado de cuenta o ticket. Extrae todos los gastos y devuélvelos en formato JSON estricto.
     El JSON debe ser una lista de diccionarios con las llaves: "fecha" (formato DD/MM/YY), "comercio" (nombre limpio), "monto" (solo número sin símbolos).
@@ -37,7 +65,7 @@ def extraer_gastos_de_documento(archivo_bytes, mime_type, instrucciones=""):
     if instrucciones:
         prompt += f"\nINSTRUCCIONES MUY IMPORTANTES DEL USUARIO: {instrucciones}\nDebes cumplir estas instrucciones estrictamente al filtrar o procesar los datos."
         
-    prompt += '\nEjemplo de salida esperada: [{"fecha": "23/09/26", "comercio": "Starbucks", "monto": 150}]'
+    prompt += '\nEjemplo de salida esperada: [{"fecha": "23/09/26", "comercio": "Starbucks", "monto": 150.50}]'
     
     ext = ".pdf" if "pdf" in mime_type else ".jpg"
     with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as temp_file:
@@ -69,7 +97,7 @@ def extraer_gastos_de_documento(archivo_bytes, mime_type, instrucciones=""):
         for intento in range(max_reintentos):
             try:
                 response = cliente_ai.models.generate_content(
-                    model='gemini-3.5-flash-lite', # Modelo ligero con 500 peticiones diarias
+                    model='gemini-3.5-flash-lite',
                     contents=[archivo_gemini, prompt]
                 )
                 texto_json = response.text.replace("```json", "").replace("```", "").strip()
@@ -102,7 +130,6 @@ def extraer_gastos_de_documento(archivo_bytes, mime_type, instrucciones=""):
             os.remove(temp_path)
 
 def clasificar_gastos_en_lote(lista_comercios):
-    """Envía todos los comercios en una sola petición para evitar límites de velocidad."""
     prompt = f"""
     Actúa como un categorizador financiero automático.
     Clasifica esta lista de comercios intentando asignar a cada uno una de estas categorías principales:
@@ -120,15 +147,10 @@ def clasificar_gastos_en_lote(lista_comercios):
     {json.dumps(lista_comercios)}
     
     Responde ÚNICAMENTE con un arreglo JSON válido, donde cada objeto tenga las llaves "comercio" y "categoria".
-    Ejemplo de salida:
-    [
-        {{"comercio": "Oxxo Naranjos", "categoria": "OXXO"}},
-        {{"comercio": "Zara", "categoria": "Zara"}}
-    ]
     """
     try:
         response = cliente_ai.models.generate_content(
-            model='gemini-3.5-flash-lite', # Modelo ligero con 500 peticiones diarias
+            model='gemini-3.5-flash-lite',
             contents=prompt
         )
         texto_json = response.text.replace("```json", "").replace("```", "").strip()
@@ -159,18 +181,14 @@ def procesar_pendientes():
     
     nombres_comercios = [item["comercio"] for item in filas_a_procesar]
     resultados_ia = clasificar_gastos_en_lote(nombres_comercios)
-    
-    # Mapeo: Si la IA falla en clasificar, usa el nombre del comercio original.
     mapa_categorias = {r.get("comercio", ""): r.get("categoria", r.get("comercio", "")) for r in resultados_ia}
     
     procesados = 0
     progress_bar = st.progress(0)
     
-    # 3. Acomodar los resultados en Google Sheets
     for i, item in enumerate(filas_a_procesar):
         comercio = item["comercio"]
         categoria = mapa_categorias.get(comercio, comercio)
-        
         status_text.text(f"Acomodando en matriz visual: {comercio} -> {categoria}")
         
         try:
@@ -186,23 +204,17 @@ def procesar_pendientes():
             valores_mes = hoja_visual.get(f"{col_letra}3:{col_letra}38")
             fila_destino = 3 + len([v for v in valores_mes if v])
             
-            try:
-                # Quitamos signos de $, comas y apóstrofos rebeldes
-                monto_limpio = str(item["monto"]).replace("$", "").replace(",", "").replace("'", "").strip()
-                monto_numerico = float(monto_limpio)
-            except ValueError:
-                monto_numerico = item["monto"] # Respaldo por si hay un error extraño
+            monto_numerico = limpiar_monto(item["monto"])
             
             if fila_destino <= 38:
                 hoja_visual.update(
                     values=[[categoria, item["fecha"], monto_numerico]],
                     range_name=f"{col_letra}{fila_destino}",
-                    value_input_option="USER_ENTERED" 
+                    value_input_option="USER_ENTERED"
                 )
                 hoja_recepcion.update_cell(item["index"], 4, "Listo")
                 procesados += 1
         
-        # Freno exclusivo para respetar los límites de la API de Google Sheets
         time.sleep(1)
         progress_bar.progress(min((i + 1) / len(filas_a_procesar), 1.0))
         
@@ -211,93 +223,9 @@ def procesar_pendientes():
 
 # --- INTERFAZ VISUAL ---
 
-# 1. Inyección de CSS (Diseño Tech-Finance: Azul Marino y Verde Esmeralda)
-st.markdown("""
-<style>
-    /* Fondo general */
-    .stApp {
-        background-color: #F8FAFC;
-    }
-    
-    /* Tipografía y encabezados */
-    h1, h2, h3 {
-        color: #0F172A !important;
-        font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-        font-weight: 700;
-    }
-    
-    /* Diseño de las Pestañas (Tabs) */
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 8px;
-        padding-bottom: 5px;
-    }
-    .stTabs [data-baseweb="tab"] {
-        background-color: #E2E8F0;
-        border-radius: 8px 8px 0px 0px;
-        padding: 12px 24px;
-        color: #475569;
-        font-weight: 600;
-    }
-    .stTabs [aria-selected="true"] {
-        background-color: #1E293B !important; /* Azul marino */
-        color: #FFFFFF !important;
-        border-bottom: 4px solid #10B981 !important; /* Acento verde */
-    }
-    
-    /* Botones primarios */
-    .stButton>button[kind="primary"] {
-        background-color: #10B981;
-        color: white;
-        border-radius: 8px;
-        border: none;
-        font-weight: 700;
-        padding: 0.5rem 1rem;
-        transition: all 0.2s ease-in-out;
-    }
-    .stButton>button[kind="primary"]:hover {
-        background-color: #059669;
-        box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
-    }
-    
-    /* Botones secundarios */
-    .stButton>button[kind="secondary"] {
-        border: 2px solid #1E293B;
-        color: #1E293B;
-        border-radius: 8px;
-        font-weight: 600;
-        transition: all 0.2s ease-in-out;
-    }
-    .stButton>button[kind="secondary"]:hover {
-        background-color: #1E293B;
-        color: white;
-    }
-    
-    /* Contenedores y formularios tipo tarjeta */
-    div[data-testid="stForm"] {
-        background-color: #FFFFFF;
-        border-radius: 12px;
-        padding: 24px;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
-        border: 1px solid #F1F5F9;
-    }
-    
-    /* Cajas de alerta (Info y Success) */
-    div[data-testid="stInfo"] {
-        background-color: #F0FDFA;
-        border-left: 5px solid #0D9488;
-        color: #115E59;
-    }
-    div[data-testid="stSuccess"] {
-        background-color: #ECFDF5;
-        border-left: 5px solid #10B981;
-        color: #065F46;
-    }
-</style>
-""", unsafe_allow_html=True)
-
-# 2. Encabezado principal personalizado
-st.markdown("<h1><span style='color: #10B981;'>💸</span> Mi Panel Financiero</h1>", unsafe_allow_html=True)
-st.markdown("<p style='color: #64748B; font-size: 1.1rem; margin-bottom: 2rem;'>Gestión inteligente con IA y sincronización en tiempo real</p>", unsafe_allow_html=True)
+st.title("💸 Mi Panel Financiero")
+st.markdown("Gestión inteligente con IA y sincronización en tiempo real")
+st.divider()
 
 tab1, tab2, tab3 = st.tabs(["✍️ Ingreso Manual", "📄 Subir Documento", "🚀 Ejecutar Ahora"])
 
@@ -308,15 +236,19 @@ with tab1:
         fecha_input = col1.date_input("Fecha", datetime.today())
         monto_input = col2.number_input("Monto ($)", min_value=0.0, format="%.2f")
         comercio_input = st.text_input("Comercio / Descripción")
-        submit_btn = st.form_submit_button("Guardar en Fila de Espera")
+        
+        # Botón primario verde
+        submit_btn = st.form_submit_button("Guardar en Fila de Espera", type="primary")
         
         if submit_btn and comercio_input:
             fecha_formateada = fecha_input.strftime("%d/%m/%y")
+            monto_limpio = limpiar_monto(monto_input)
+            
             hoja_recepcion.append_row(
-                [fecha_formateada, comercio_input, monto_input],
+                [fecha_formateada, comercio_input, monto_limpio],
                 value_input_option="USER_ENTERED"
             )
-            st.success(f"Guardado exitosamente: {comercio_input} por ${monto_input}")
+            st.success(f"Guardado exitosamente: {comercio_input} por ${monto_limpio}")
 
 with tab2:
     st.subheader("Extraer desde Ticket o Estado de Cuenta")
@@ -326,10 +258,11 @@ with tab2:
     
     instrucciones_usuario = st.text_area(
         "Instrucciones especiales para la IA (Opcional)", 
-        placeholder="Ej. Solo extrae los gastos del mes de septiembre, e ignora los retiros en efectivo..."
+        placeholder="Ej. Solo extrae los gastos del mes de septiembre..."
     )
     
     if archivo_subido is not None:
+        # Botón primario verde
         if st.button("Analizar Documento", type="primary"):
             with st.spinner("La IA está leyendo y filtrando el documento..."):
                 bytes_data = archivo_subido.getvalue()
@@ -346,13 +279,9 @@ with tab2:
                 if gastos_extraidos:
                     st.write(f"**Se encontraron y filtraron {len(gastos_extraidos)} gastos:**")
                     for g in gastos_extraidos:
-                        st.write(f"- 📅 {g['fecha']} | 🏢 {g['comercio']} | 💵 ${g['monto']}")
+                        monto_limpio = limpiar_monto(g['monto'])
+                        st.write(f"- 📅 {g['fecha']} | 🏢 {g['comercio']} | 💵 ${monto_limpio}")
                         
-                        try:
-                            monto_limpio = float(str(g['monto']).replace("$", "").replace(",", "").replace("'", "").strip())
-                        except ValueError:
-                            monto_limpio = g['monto']
-                            
                         hoja_recepcion.append_row(
                             [g['fecha'], g['comercio'], monto_limpio],
                             value_input_option="USER_ENTERED"
@@ -363,8 +292,9 @@ with tab2:
 
 with tab3:
     st.subheader("Acomodar gastos pendientes")
-    st.write("Presiona este botón para que la IA clasifique todos los gastos de la fila de espera en un solo bloque y los envíe a tu matriz de Google Sheets.")
+    st.write("Presiona este botón para que la IA clasifique todos los gastos de la fila de espera en un solo bloque.")
     
+    # Botón primario verde
     if st.button("🚀 Procesar Todo Ahora", type="primary"):
         with st.spinner("Despertando a la IA y acomodando celdas en el panel visual..."):
             total = procesar_pendientes()

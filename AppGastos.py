@@ -212,7 +212,7 @@ def procesar_pendientes():
 
 # --- INTERFAZ VISUAL ---
 
-st.title("💸 Mi Panel Financiero")
+st.title("Mi Panel Financiero")
 
 tab1, tab2, tab3 = st.tabs(["✍️ Ingreso Manual", "📄 Subir Documento", "🚀 Ejecutar Ahora"])
 

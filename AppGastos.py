@@ -166,9 +166,9 @@ def procesar_pendientes():
     procesados = 0
     progress_bar = st.progress(0)
     
+    # 3. Acomodar los resultados en Google Sheets
     for i, item in enumerate(filas_a_procesar):
         comercio = item["comercio"]
-        # Tomar la categoría de la IA, si no existe en el mapa, usar el nombre original
         categoria = mapa_categorias.get(comercio, comercio)
         
         status_text.text(f"Acomodando en matriz visual: {comercio} -> {categoria}")
@@ -186,10 +186,19 @@ def procesar_pendientes():
             valores_mes = hoja_visual.get(f"{col_letra}3:{col_letra}38")
             fila_destino = 3 + len([v for v in valores_mes if v])
             
+            # --- NUEVO: Convertir a número limpio ---
+            try:
+                # Quitamos signos de $ o comas y lo convertimos a decimal
+                monto_limpio = str(item["monto"]).replace("$", "").replace(",", "").strip()
+                monto_numerico = float(monto_limpio)
+            except ValueError:
+                monto_numerico = item["monto"] # Respaldo por si hay un error extraño
+            
             if fila_destino <= 38:
                 hoja_visual.update(
-                    values=[[categoria, item["fecha"], item["monto"]]],
-                    range_name=f"{col_letra}{fila_destino}"
+                    values=[[categoria, item["fecha"], monto_numerico]],
+                    range_name=f"{col_letra}{fila_destino}",
+                    value_input_option="USER_ENTERED" # <- ESTA ES LA MAGIA
                 )
                 hoja_recepcion.update_cell(item["index"], 4, "Listo")
                 procesados += 1

@@ -390,43 +390,199 @@ with tab1:
 
 with tab2:
     st.subheader("Extraer desde Ticket o Estado de Cuenta")
-    st.info("Sube una foto de un ticket o un PDF de tu banco. La inteligencia artificial extraerá y filtrará los datos automáticamente.")
-    
-    archivo_subido = st.file_uploader("Sube tu archivo", type=["pdf", "png", "jpg", "jpeg"])
-    
-    instrucciones_usuario = st.text_area(
-        "Instrucciones especiales para la IA (Opcional)", 
-        placeholder="Ej. Solo extrae los gastos del mes de septiembre..."
+
+    st.info(
+        "Puedes subir un PDF o imagen, "
+        "o pegar directamente una imagen desde tu portapapeles."
     )
-    
-    if archivo_subido is not None:
-        # Botón primario verde
-        if st.button("Analizar Documento", type="primary"):
-            with st.spinner("La IA está leyendo y filtrando el documento..."):
-                bytes_data = archivo_subido.getvalue()
-                
-                if archivo_subido.name.endswith(".pdf"):
-                    mime = "application/pdf"
-                elif archivo_subido.name.endswith(".png"):
-                    mime = "image/png"
-                else:
-                    mime = "image/jpeg"
-                
-                gastos_extraidos = extraer_gastos_de_documento(bytes_data, mime, instrucciones_usuario)
-                
-                if gastos_extraidos:
-                    st.write(f"**Se encontraron y filtraron {len(gastos_extraidos)} gastos:**")
-                    for g in gastos_extraidos:
-                        monto_limpio = limpiar_monto(g['monto'])
-                        st.write(f"- 📅 {g['fecha']} | 🏢 {g['comercio']} | 💵 ${monto_limpio}")
-                        
-                        hoja_recepcion.append_row(
-                            [g['fecha'], g['comercio'], monto_limpio],
-                            value_input_option="USER_ENTERED"
+
+    modo_entrada = st.radio(
+        "¿Cómo quieres agregar el documento?",
+        [
+            "📎 Subir archivo",
+            "📋 Pegar imagen"
+        ],
+        horizontal=True
+    )
+
+    instrucciones_usuario = st.text_area(
+        "Instrucciones especiales para la IA (Opcional)",
+        placeholder="Ej. Solo extrae los gastos del mes de octubre..."
+    )
+
+    # =====================================================
+    # OPCIÓN 1: SUBIR ARCHIVO
+    # =====================================================
+
+    if modo_entrada == "📎 Subir archivo":
+
+        archivo_subido = st.file_uploader(
+            "Sube tu archivo",
+            type=["pdf", "png", "jpg", "jpeg"]
+        )
+
+        if archivo_subido is not None:
+
+            if st.button(
+                "Analizar Documento",
+                type="primary",
+                key="analizar_archivo"
+            ):
+
+                with st.spinner(
+                    "La IA está leyendo y filtrando el documento..."
+                ):
+
+                    bytes_data = archivo_subido.getvalue()
+
+                    nombre_archivo = archivo_subido.name.lower()
+
+                    if nombre_archivo.endswith(".pdf"):
+                        mime = "application/pdf"
+
+                    elif nombre_archivo.endswith(".png"):
+                        mime = "image/png"
+
+                    else:
+                        mime = "image/jpeg"
+
+                    gastos_extraidos = extraer_gastos_de_documento(
+                        bytes_data,
+                        mime,
+                        instrucciones_usuario
+                    )
+
+                    if gastos_extraidos:
+
+                        st.write(
+                            f"**Se encontraron "
+                            f"{len(gastos_extraidos)} gastos:**"
                         )
-                    st.success("¡Todos los gastos se agregaron a la fila de espera correctamente!")
-                else:
-                    st.warning("No se encontraron gastos o no coincidieron con tus instrucciones.")
+
+                        for g in gastos_extraidos:
+
+                            monto_limpio = limpiar_monto(
+                                g["monto"]
+                            )
+
+                            st.write(
+                                f"- 📅 {g['fecha']} | "
+                                f"🏢 {g['comercio']} | "
+                                f"💵 ${monto_limpio}"
+                            )
+
+                            hoja_recepcion.append_row(
+                                [
+                                    g["fecha"],
+                                    g["comercio"],
+                                    monto_limpio
+                                ],
+                                value_input_option="USER_ENTERED"
+                            )
+
+                        st.success(
+                            "¡Todos los gastos se agregaron "
+                            "a la fila de espera correctamente!"
+                        )
+
+                    else:
+
+                        st.warning(
+                            "No se encontraron gastos "
+                            "o no coincidieron con tus instrucciones."
+                        )
+
+    # =====================================================
+    # OPCIÓN 2: PEGAR IMAGEN
+    # =====================================================
+
+    if modo_entrada == "📋 Pegar imagen":
+
+        st.write(
+            "Copia una captura, ticket o imagen y "
+            "presiona el botón de abajo."
+        )
+
+        imagen_pegada = paste_image_button(
+            label="📋 Pegar imagen del portapapeles",
+            key="imagen_portapapeles"
+        )
+
+        if imagen_pegada.image_data is not None:
+
+            imagen = imagen_pegada.image_data
+
+            st.image(
+                imagen,
+                caption="Imagen pegada",
+                use_container_width=True
+            )
+
+            if st.button(
+                "Analizar imagen pegada",
+                type="primary",
+                key="analizar_imagen_pegada"
+            ):
+
+                with st.spinner(
+                    "La IA está leyendo la imagen..."
+                ):
+
+                    buffer = BytesIO()
+
+                    # Convertimos a PNG para Gemini
+                    imagen.save(
+                        buffer,
+                        format="PNG"
+                    )
+
+                    bytes_data = buffer.getvalue()
+
+                    gastos_extraidos = extraer_gastos_de_documento(
+                        bytes_data,
+                        "image/png",
+                        instrucciones_usuario
+                    )
+
+                    if gastos_extraidos:
+
+                        st.write(
+                            f"**Se encontraron "
+                            f"{len(gastos_extraidos)} gastos:**"
+                        )
+
+                        for g in gastos_extraidos:
+
+                            monto_limpio = limpiar_monto(
+                                g["monto"]
+                            )
+
+                            st.write(
+                                f"- 📅 {g['fecha']} | "
+                                f"🏢 {g['comercio']} | "
+                                f"💵 ${monto_limpio}"
+                            )
+
+                            hoja_recepcion.append_row(
+                                [
+                                    g["fecha"],
+                                    g["comercio"],
+                                    monto_limpio
+                                ],
+                                value_input_option="USER_ENTERED"
+                            )
+
+                        st.success(
+                            "¡Todos los gastos se agregaron "
+                            "a la fila de espera correctamente!"
+                        )
+
+                    else:
+
+                        st.warning(
+                            "No se encontraron gastos "
+                            "en la imagen pegada."
+                        )
 
 with tab3:
     st.subheader("Acomodar gastos pendientes")

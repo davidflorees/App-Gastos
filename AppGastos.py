@@ -161,8 +161,9 @@ def clasificar_gastos_en_lote(lista_comercios):
 
 def procesar_pendientes():
     registros = hoja_recepcion.get_all_values()
-    
+
     filas_a_procesar = []
+
     for index, fila in enumerate(registros[1:], start=2):
         if len(fila) < 4 or fila[3] != "Listo":
             if fila[0] and fila[1]:
@@ -172,66 +173,173 @@ def procesar_pendientes():
                     "comercio": fila[1],
                     "monto": fila[2]
                 })
-                
+
     if not filas_a_procesar:
         return 0
 
     status_text = st.empty()
-    status_text.info(f"Enviando un paquete de {len(filas_a_procesar)} gastos a la IA...")
-    
-    nombres_comercios = [item["comercio"] for item in filas_a_procesar]
-    resultados_ia = clasificar_gastos_en_lote(nombres_comercios)
-    mapa_categorias = {r.get("comercio", ""): r.get("categoria", r.get("comercio", "")) for r in resultados_ia}
-    
-    procesados = 0
-    progress_bar = st.progress(0)
-    
-    for i, item in enumerate(filas_a_procesar):
-        comercio = item["comercio"]
-        categoria = mapa_categorias.get(comercio, comercio)
-        status_text.text(f"Acomodando en matriz visual: {comercio} -> {categoria}")
-        
-        try:
-            mes = int(item["fecha"].split('-')[1]) if '-' in item["fecha"] else int(item["fecha"].split('/')[1])
-        except:
-            continue
-            
-        columnas_mes = {1: 1, 2: 4, 3: 7, 4: 10, 5: 13, 6: 16, 7: 19, 8: 22, 9: 25, 10: 28, 11: 31, 12: 34}
-        col_inicial = columnas_mes.get(mes)
-        
-        if col_inicial:
-    # Convertir correctamente el número de columna a letra
-    # Ejemplo: 28 -> AB
-    col_letra = gspread.utils.rowcol_to_a1(1, col_inicial)
-    col_letra = ''.join(filter(str.isalpha, col_letra))
-
-    valores_mes = hoja_visual.get(
-        f"{col_letra}3:{col_letra}38"
+    status_text.info(
+        f"Enviando un paquete de {len(filas_a_procesar)} gastos a la IA..."
     )
 
-    fila_destino = 3 + len([v for v in valores_mes if v])
+    # Obtener todos los comercios pendientes
+    nombres_comercios = [
+        item["comercio"]
+        for item in filas_a_procesar
+    ]
 
-    monto_numerico = limpiar_monto(item["monto"])
+    # Clasificarlos en un solo lote
+    resultados_ia = clasificar_gastos_en_lote(nombres_comercios)
 
-    if fila_destino <= 38:
-        hoja_visual.update(
-            values=[[categoria, item["fecha"], monto_numerico]],
-            range_name=f"{col_letra}{fila_destino}",
-            value_input_option="USER_ENTERED"
+    mapa_categorias = {
+        r.get("comercio", ""):
+        r.get("categoria", r.get("comercio", ""))
+        for r in resultados_ia
+    }
+
+    procesados = 0
+    progress_bar = st.progress(0)
+
+    for i, item in enumerate(filas_a_procesar):
+
+        comercio = item["comercio"]
+        categoria = mapa_categorias.get(comercio, comercio)
+
+        status_text.text(
+            f"Acomodando en matriz visual: "
+            f"{comercio} -> {categoria}"
         )
 
-        hoja_recepcion.update_cell(
-            item["index"],
-            4,
-            "Listo"
+        # ---------------------------------------
+        # 1. OBTENER EL MES
+        # ---------------------------------------
+
+        try:
+            if "-" in item["fecha"]:
+                mes = int(item["fecha"].split("-")[1])
+            else:
+                mes = int(item["fecha"].split("/")[1])
+
+        except Exception:
+            continue
+
+        # ---------------------------------------
+        # 2. COLUMNAS CORRESPONDIENTES A CADA MES
+        # ---------------------------------------
+
+        columnas_mes = {
+            1: 1,    # Enero       A
+            2: 4,    # Febrero     D
+            3: 7,    # Marzo       G
+            4: 10,   # Abril       J
+            5: 13,   # Mayo        M
+            6: 16,   # Junio       P
+            7: 19,   # Julio       S
+            8: 22,   # Agosto      V
+            9: 25,   # Septiembre  Y
+            10: 28,  # Octubre     AB
+            11: 31,  # Noviembre   AE
+            12: 34   # Diciembre   AH
+        }
+
+        col_inicial = columnas_mes.get(mes)
+
+        if not col_inicial:
+            continue
+
+        # ---------------------------------------
+        # 3. BUSCAR CUÁNTOS GASTOS HAY EN EL MES
+        # ---------------------------------------
+        #
+        # IMPORTANTE:
+        # Aquí ya NO convertimos AB -> A accidentalmente.
+        # Se trabaja directamente con el número de columna.
+        #
+
+        celdas_mes = hoja_visual.range(
+            3,
+            col_inicial,
+            38,
+            col_inicial
         )
 
-        procesados += 1
+        filas_ocupadas = len([
+            celda
+            for celda in celdas_mes
+            if celda.value
+        ])
 
-        time.sleep(1)
-        progress_bar.progress(min((i + 1) / len(filas_a_procesar), 1.0))
-        
+        fila_destino = 3 + filas_ocupadas
+
+        # ---------------------------------------
+        # 4. LIMPIAR MONTO
+        # ---------------------------------------
+
+        monto_numerico = limpiar_monto(item["monto"])
+
+        # ---------------------------------------
+        # 5. ESCRIBIR EN LA HOJA 2026
+        # ---------------------------------------
+
+        if fila_destino <= 38:
+
+            # Crear rango exacto de 3 columnas:
+            # Categoría | Fecha | Importe
+
+            celda_inicio = gspread.utils.rowcol_to_a1(
+                fila_destino,
+                col_inicial
+            )
+
+            celda_fin = gspread.utils.rowcol_to_a1(
+                fila_destino,
+                col_inicial + 2
+            )
+
+            rango_destino = f"{celda_inicio}:{celda_fin}"
+
+            hoja_visual.update(
+                values=[[
+                    categoria,
+                    item["fecha"],
+                    monto_numerico
+                ]],
+                range_name=rango_destino,
+                value_input_option="USER_ENTERED"
+            )
+
+            # ---------------------------------------
+            # 6. MARCAR COMO LISTO
+            # ---------------------------------------
+
+            hoja_recepcion.update_cell(
+                item["index"],
+                4,
+                "Listo"
+            )
+
+            procesados += 1
+
+            print(
+                f"Guardado: {comercio} | "
+                f"Mes: {mes} | "
+                f"Columna: {col_inicial} | "
+                f"Fila: {fila_destino} | "
+                f"Rango: {rango_destino}"
+            )
+
+            time.sleep(1)
+
+        # Actualizar barra de progreso
+        progress_bar.progress(
+            min(
+                (i + 1) / len(filas_a_procesar),
+                1.0
+            )
+        )
+
     status_text.text("¡Procesamiento finalizado!")
+
     return procesados
 
 # --- INTERFAZ VISUAL ---

@@ -21,8 +21,8 @@ import unicodedata
 MESES = ("Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio",
          "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre")
 GRUPOS = ("Necesarios", "Salidas", "OXXO", "Yo")
-COLORES = {"Necesarios": "#34D399", "Salidas": "#FBBF24",
-           "OXXO": "#38BDF8", "Yo": "#A78BFA"}
+COLORES = {"Necesarios": "#258467", "Salidas": "#B17A21",
+           "OXXO": "#357EA2", "Yo": "#8660AD"}
 
 
 def hoy_local():
@@ -246,8 +246,8 @@ def render_finanzas(archivo, cliente_ai):
     def cargar_anio(anio, _archivo):
         return leer_matriz(_archivo.worksheet(str(anio)).get_all_values(), anio)
 
-    st.markdown("### 📊 Inteligencia financiera")
-    st.caption("Movimientos de las hojas anuales · cifras calculadas desde transacciones · importes en MXN")
+    st.subheader("Tu panorama financiero")
+    st.caption("Elige un periodo para consultar tus gastos, presupuesto y tendencias. Todos los importes están en MXN.")
     try:
         anios = sorted(int(ws.title) for ws in archivo.worksheets() if re.fullmatch(r"20\d{2}", ws.title))
         if not anios:
@@ -264,13 +264,15 @@ def render_finanzas(archivo, cliente_ai):
         st.error(f"No se pudieron leer las hojas anuales: {exc}")
         return
 
+    st.markdown("##### Periodo de consulta")
     ctrl1, ctrl2, ctrl3 = st.columns([1, 1, 1])
     anio = ctrl1.selectbox("Año", anios, index=len(anios) - 1, key="fin_anio")
     meses_con_datos = sorted({r["mes"] for r in datos if r["anio"] == anio})
     mes_default = meses_con_datos[-1] if meses_con_datos else hoy_local().month
     mes = ctrl2.selectbox("Mes", range(1, 13), index=mes_default - 1,
                           format_func=lambda m: MESES[m - 1], key="fin_mes")
-    if ctrl3.button("↻ Actualizar datos", use_container_width=True):
+    ctrl3.markdown("<div class=filter-spacer aria-hidden=true></div>", unsafe_allow_html=True)
+    if ctrl3.button("Actualizar datos", use_container_width=True):
         cargar_anio.clear()
         st.rerun()
 
@@ -287,38 +289,42 @@ def render_finanzas(archivo, cliente_ai):
         return
     limite = Decimal(str(presupuesto["total"])) if presupuesto["total"] > 0 else None
 
-    tab_mes, tab_anual, tab_categoria, tab_calidad = st.tabs(
-        ["📍 Mes y presupuesto", "📈 Evolución", "🔎 Categorías", "🧾 Calidad de datos"])
+    st.caption(f"Consultando {MESES[mes - 1].lower()} de {anio} · La evolución muestra el año seleccionado.")
+    tab_mes, tab_presupuesto, tab_anual, tab_categoria, tab_hallazgos, tab_calidad = st.tabs(
+        ["Resumen", "Presupuesto", "Evolución", "Categorías", "Hallazgos", "Revisión"])
     with tab_mes:
         st.markdown(f"#### {MESES[mes - 1]} {anio}")
         if not del_mes:
             st.info("No hay movimientos válidos para el mes elegido. Puedes configurar su presupuesto de todos modos.")
         a, b, c, d = st.columns(4)
-        a.metric("Gastado", moneda(actual["total"]), delta=comparacion(actual["total"], anterior["total"]) if anterior else None,
+        a.metric("Gasto del mes", moneda(actual["total"]), delta=comparacion(actual["total"], anterior["total"]) if anterior else None,
                  delta_color="inverse")
         b.metric("Movimientos", actual["conteo"])
-        c.metric("Ticket promedio", moneda(actual["total"] / actual["conteo"]) if actual["conteo"] else "—")
-        d.metric("Mayor categoría", actual["categorias"][0]["categoria"] if actual["categorias"] else "—")
+        c.metric("Promedio por gasto", moneda(actual["total"] / actual["conteo"]) if actual["conteo"] else "—")
+        d.metric("Categoría principal", actual["categorias"][0]["categoria"] if actual["categorias"] else "—")
 
-        st.markdown("##### Tus cuatro bolsas")
+        st.markdown("##### ¿Cómo se distribuye tu gasto?")
+        st.caption("Tus cuatro bolsas: Necesarios, Salidas, OXXO y Yo.")
         cols = st.columns(4)
         for col, grupo in zip(cols, GRUPOS):
             valor = actual["grupos"][grupo]
             col.metric(grupo, moneda(valor), f"{float(valor / actual['total'] * 100):.1f}% del gasto" if actual["total"] else "0% del gasto", delta_color="off")
         if actual["conteo"]:
             df_grupos = pd.DataFrame([{"Grupo": g, "MXN": float(actual["grupos"][g])} for g in GRUPOS])
-            st.bar_chart(df_grupos.set_index("Grupo"), color="#34D399")
+            st.bar_chart(df_grupos.set_index("Grupo"), color="#258467")
             dia_pico = max(actual["dias"], key=actual["dias"].get)
             st.caption(f"Día de mayor gasto: {dia_pico:%d/%m/%Y} · {moneda(actual['dias'][dia_pico])}")
             st.markdown("##### Ritmo diario y semanal")
             st.line_chart(pd.DataFrame([{"Fecha": dia, "MXN": float(valor)}
-                                         for dia, valor in actual["dias"].items()]).set_index("Fecha"), color="#38BDF8")
+                                         for dia, valor in actual["dias"].items()]).set_index("Fecha"), color="#357EA2")
             st.bar_chart(pd.DataFrame([{"Semana desde": dia, "MXN": float(valor)}
-                                        for dia, valor in actual["semanas"].items()]).set_index("Semana desde"), color="#FBBF24")
+                                        for dia, valor in actual["semanas"].items()]).set_index("Semana desde"), color="#B17A21")
             fin_de_semana = sum((r["importe"] for r in del_mes if r["fecha"].weekday() >= 5), Decimal(0))
             st.caption(f"Fines de semana: {moneda(fin_de_semana)} · {float(fin_de_semana / actual['total'] * 100):.1f}% del mes.")
 
-        st.markdown("##### Presupuesto mensual")
+    with tab_presupuesto:
+        st.markdown(f"#### Presupuesto · {MESES[mes - 1]} {anio}")
+        st.caption("Ajusta tu límite mensual y, si lo necesitas, asigna un límite a cada bolsa.")
         with st.form(f"presupuesto_{anio}_{mes}"):
             nuevo = {}
             nuevo["total"] = st.number_input("Límite total mensual (MXN)", 0.0, 1_000_000_000.0,
@@ -331,7 +337,7 @@ def render_finanzas(archivo, cliente_ai):
             if st.form_submit_button("Guardar presupuesto", type="primary"):
                 try:
                     guardar_presupuesto(anio, mes, nuevo)
-                    st.success("Presupuesto guardado fuera de Google Sheets.")
+                    st.success("Tu presupuesto se guardó correctamente.")
                     st.rerun()
                 except (OSError, sqlite3.Error, ValueError) as exc:
                     st.error(f"No se pudo guardar el presupuesto: {exc}")
@@ -360,16 +366,18 @@ def render_finanzas(archivo, cliente_ai):
                 st.caption(f"{grupo}: {moneda(actual['grupos'][grupo])} de {moneda(techo)} · {float(actual['grupos'][grupo] / techo * 100):.1f}%")
                 st.progress(min(float(actual["grupos"][grupo] / techo), 1.0))
 
-        st.markdown("##### Hallazgos y acciones")
+    with tab_hallazgos:
+        st.markdown(f"#### Hallazgos · {MESES[mes - 1]} {anio}")
+        st.caption("Observaciones sobre tus gastos y una interpretación opcional con IA.")
         ideas = hallazgos(actual, anterior, del_mes, limite)
         for idea in ideas:
-            st.write("• " + idea)
+            st.info(idea)
         if actual["grupos"]["OXXO"] and mes:
             oxxo = [r for r in del_mes if r["grupo"] == "OXXO"]
             st.caption(f"Si se repitiera durante 12 meses el patrón de OXXO de este mes: {moneda(actual['grupos']['OXXO'] * 12)} al año. Es un escenario ilustrativo.")
             if len(oxxo) >= 4:
                 st.write("• Puedes revisar la frecuencia de OXXO y establecer un límite específico para observarla mes a mes.")
-        if st.button("✨ Interpretar cifras con Gemini", disabled=not bool(del_mes)):
+        if st.button("Interpretar mis gastos con IA", disabled=not bool(del_mes)):
             payload = {"periodo": f"{MESES[mes-1]} {anio}", "total": str(actual["total"]),
                        "movimientos": actual["conteo"], "bolsas": {k: str(v) for k, v in actual["grupos"].items()},
                        "categorias": [{"nombre": c["categoria"], "total": str(c["total"]), "cantidad": c["movimientos"]} for c in actual["categorias"][:12]],
@@ -384,6 +392,8 @@ def render_finanzas(archivo, cliente_ai):
                 st.warning(f"No se pudo generar la interpretación: {exc}")
 
     with tab_anual:
+        st.markdown(f"#### Tu año en perspectiva · {anio}")
+        st.caption("Compara los meses con movimientos y observa la evolución de cada bolsa.")
         registros_anio = [r for r in datos if r["anio"] == anio]
         mensual = {m: resumen([r for r in registros_anio if r["mes"] == m]) for m in range(1, 13)}
         meses_activos = [m for m in range(1, 13) if mensual[m]["conteo"]]
@@ -397,14 +407,15 @@ def render_finanzas(archivo, cliente_ai):
                                    **{g: float(mensual[m]["grupos"][g]) for g in GRUPOS}}
                                   for m in meses_activos]).set_index("Mes")
             st.markdown("##### Gasto mensual")
-            st.line_chart(serie[["Total"]], color="#34D399")
+            st.line_chart(serie[["Total"]], color="#258467")
             st.markdown("##### Evolución por bolsa")
             st.line_chart(serie[list(GRUPOS)])
             st.dataframe(serie.style.format("${:,.2f}"), use_container_width=True)
             st.caption("Se muestran solo meses con movimientos válidos. Los meses sin datos no se tratan como gasto cero.")
 
     with tab_categoria:
-        st.markdown(f"##### Categorías · {MESES[mes - 1]} {anio}")
+        st.markdown(f"#### Gasto por categoría · {MESES[mes - 1]} {anio}")
+        st.caption("Consulta el detalle del mes y explora una categoría a lo largo del año.")
         prev_categorias = {r["clave"]: r["total"] for r in anterior["categorias"]} if anterior else {}
         if actual["categorias"]:
             tabla = pd.DataFrame([{"Categoría": r["categoria"], "Total": moneda(r["total"]),
@@ -413,14 +424,18 @@ def render_finanzas(archivo, cliente_ai):
                                    "Mínimo": moneda(r["minimo"]),
                                    "Vs anterior": comparacion(r["total"], prev_categorias.get(r["clave"], Decimal(0))) if anterior else "Sin datos previos"}
                                   for r in actual["categorias"]])
+            st.caption("Desliza la tabla horizontalmente para ver todas las columnas en tu teléfono.")
             st.dataframe(tabla, hide_index=True, use_container_width=True)
             st.bar_chart(pd.DataFrame([{"Categoría": x["categoria"], "MXN": float(x["total"])}
-                                       for x in actual["categorias"][:12]]).set_index("Categoría"), color="#34D399")
+                                       for x in actual["categorias"][:12]]).set_index("Categoría"), color="#258467")
+        else:
+            st.info("No hay categorías con movimientos válidos en este mes. Puedes explorar las del año si hay datos disponibles.")
         categorias_anio = {}
         for r in datos:
             if r["anio"] == anio:
                 categorias_anio.setdefault(r["clave"], r["categoria"])
         if categorias_anio:
+            st.markdown("##### Explora una categoría en el año")
             clave = st.selectbox("Explorar categoría", list(categorias_anio),
                                  format_func=lambda c: categorias_anio[c])
             detalle = [r for r in datos if r["anio"] == anio and r["clave"] == clave]
@@ -429,10 +444,12 @@ def render_finanzas(archivo, cliente_ai):
                                          "Movimientos": por_mes[m]["conteo"],
                                          "Ticket promedio": float(por_mes[m]["total"] / por_mes[m]["conteo"]) if por_mes[m]["conteo"] else 0}
                                         for m in range(1, 13) if por_mes[m]["conteo"]]).set_index("Mes")
-            st.line_chart(trayectoria[["Total"]], color="#A78BFA")
+            st.line_chart(trayectoria[["Total"]], color="#8660AD")
             st.dataframe(trayectoria.style.format({"Total": "${:,.2f}", "Ticket promedio": "${:,.2f}"}), use_container_width=True)
 
     with tab_calidad:
+        st.markdown(f"#### Revisión · {MESES[mes - 1]} {anio}")
+        st.caption("Consulta registros excluidos, variaciones y respaldos de tus presupuestos.")
         st.markdown("##### Registros que requieren revisión")
         avisos = [a for a in alertas_por_anio.get(anio, []) if f"{anio} {MESES[mes-1]}" in a]
         for aviso in avisos:
@@ -442,19 +459,19 @@ def render_finanzas(archivo, cliente_ai):
         st.markdown("##### Variaciones y valores atípicos")
         anomalas = detectar_anomalias(actual, anterior, del_mes)
         for aviso in anomalas:
-            st.write("• " + aviso)
+            st.warning(aviso)
         if not anomalas:
             st.caption("Sin alertas según los umbrales actuales (2.5× mediana o aumentos de al menos 50%).")
         st.caption("Se excluyen las filas con fecha fuera del mes, importes inválidos y movimientos incompletos; el archivo no se corrige automáticamente.")
-        st.markdown("##### Respaldo de presupuestos")
-        st.download_button("Descargar presupuestos (.json)", exportar_presupuestos(),
-                           file_name="presupuestos_gastos.json", mime="application/json")
-        respaldo = st.file_uploader("Restaurar o migrar presupuestos (.json)", type="json", key="fin_import")
-        if respaldo and st.button("Importar presupuestos del respaldo"):
-            try:
-                cantidad = importar_presupuestos(respaldo.getvalue().decode("utf-8"))
-                st.success(f"Se importaron {cantidad} periodos.")
-                st.rerun()
-            except (ValueError, KeyError, TypeError, UnicodeDecodeError, sqlite3.Error) as exc:
-                st.error(f"Respaldo inválido: {exc}")
-        st.caption("Los presupuestos se guardan en un archivo SQLite separado. Si tu alojamiento reinicia el disco de la app, conserva y restaura el respaldo JSON.")
+        with st.expander("Respaldo y restauración de presupuestos", expanded=False):
+            st.download_button("Descargar presupuestos (.json)", exportar_presupuestos(),
+                               file_name="presupuestos_gastos.json", mime="application/json")
+            respaldo = st.file_uploader("Restaurar o migrar presupuestos (.json)", type="json", key="fin_import")
+            if respaldo and st.button("Importar presupuestos del respaldo"):
+                try:
+                    cantidad = importar_presupuestos(respaldo.getvalue().decode("utf-8"))
+                    st.success(f"Se importaron {cantidad} periodos.")
+                    st.rerun()
+                except (ValueError, KeyError, TypeError, UnicodeDecodeError, sqlite3.Error) as exc:
+                    st.error(f"Respaldo inválido: {exc}")
+            st.caption("Los presupuestos se guardan en un archivo SQLite separado. Si tu alojamiento reinicia el disco de la app, conserva y restaura el respaldo JSON.")

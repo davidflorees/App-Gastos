@@ -200,21 +200,34 @@ def procesar_pendientes():
         col_inicial = columnas_mes.get(mes)
         
         if col_inicial:
-            col_letra = gspread.utils.rowcol_to_a1(1, col_inicial)[0]
-            valores_mes = hoja_visual.get(f"{col_letra}3:{col_letra}38")
-            fila_destino = 3 + len([v for v in valores_mes if v])
-            
-            monto_numerico = limpiar_monto(item["monto"])
-            
-            if fila_destino <= 38:
-                hoja_visual.update(
-                    values=[[categoria, item["fecha"], monto_numerico]],
-                    range_name=f"{col_letra}{fila_destino}",
-                    value_input_option="USER_ENTERED"
-                )
-                hoja_recepcion.update_cell(item["index"], 4, "Listo")
-                procesados += 1
-        
+    # Convertir correctamente el número de columna a letra
+    # Ejemplo: 28 -> AB
+    col_letra = gspread.utils.rowcol_to_a1(1, col_inicial)
+    col_letra = ''.join(filter(str.isalpha, col_letra))
+
+    valores_mes = hoja_visual.get(
+        f"{col_letra}3:{col_letra}38"
+    )
+
+    fila_destino = 3 + len([v for v in valores_mes if v])
+
+    monto_numerico = limpiar_monto(item["monto"])
+
+    if fila_destino <= 38:
+        hoja_visual.update(
+            values=[[categoria, item["fecha"], monto_numerico]],
+            range_name=f"{col_letra}{fila_destino}",
+            value_input_option="USER_ENTERED"
+        )
+
+        hoja_recepcion.update_cell(
+            item["index"],
+            4,
+            "Listo"
+        )
+
+        procesados += 1
+
         time.sleep(1)
         progress_bar.progress(min((i + 1) / len(filas_a_procesar), 1.0))
         

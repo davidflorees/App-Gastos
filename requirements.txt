@@ -1,4 +1,5 @@
 streamlit
+streamlit-paste-button
 gspread
 google-genai
 pillow

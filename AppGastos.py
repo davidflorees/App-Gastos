@@ -1,4 +1,6 @@
 import streamlit as st
+from streamlit_paste_button import paste_image_button
+from io import BytesIO
 import gspread
 from google import genai
 import time

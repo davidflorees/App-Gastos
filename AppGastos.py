@@ -10,7 +10,7 @@ import tempfile
 from datetime import datetime
 
 # --- CONFIGURACIÓN INICIAL ---
-st.set_page_config(page_title="Gestor de Gastos", page_icon="💸", layout="wide")
+st.set_page_config(page_title="Mis finanzas", page_icon="💸", layout="wide")
 
 GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
 cliente_ai = genai.Client(api_key=GEMINI_API_KEY)
@@ -349,26 +349,116 @@ def procesar_pendientes():
 from finanzas import render_finanzas
 
 st.markdown("""<style>
-  .stApp {background: radial-gradient(ellipse at 80% -15%, #12382f 0, #08111f 44%, #08111f 100%); color:#eef7f5}
-  .block-container {max-width:1180px; padding-top:2rem; padding-bottom:3rem}
-  h1, h2, h3 {letter-spacing:-.025em}
-  [data-testid="stMetric"] {background:#112338; border:1px solid #254159; border-radius:16px; padding:18px}
-  [data-testid="stMetricValue"] {color:#f8fafc}
-  [data-baseweb="tab-list"] {gap:.35rem; flex-wrap:wrap}
-  [data-baseweb="tab"] {border-radius:12px; padding:.65rem 1rem; background:#13243a}
-  [data-testid="stForm"], [data-testid="stFileUploader"] {border-radius:18px; border:1px solid #294158; background:#101e30; padding:1rem}
-  .stButton button[kind="primary"], .stFormSubmitButton button[kind="primary"] {border-radius:12px; font-weight:700}
-  @media(max-width:760px) {.block-container {padding:1rem .75rem 2rem}}
+  .block-container {max-width:1120px; padding-top:2.2rem; padding-bottom:3rem}
+  h1,h2,h3 {letter-spacing:-.035em; font-weight:700}
+  h2 {font-size:1.65rem !important} h3 {font-size:1.3rem !important}
+  .finance-hero {background:#123c35; color:#fff; border-radius:24px;
+    padding:30px 34px; margin-bottom:22px; position:relative; overflow:hidden}
+  .finance-hero .eyebrow {color:#b8e8cd; font-size:.75rem; font-weight:700;
+    letter-spacing:.14em; text-transform:uppercase; margin-bottom:10px}
+  .finance-hero h1 {color:#fff; font-size:2.35rem; padding:0 0 8px; line-height:1.15}
+  .finance-hero p {color:#d7e9e1; margin:0; max-width:620px; line-height:1.6}
+  .finance-hero .tag {display:inline-block; color:#d7e9e1; border:1px solid #53776b;
+    padding:5px 12px; border-radius:30px; margin-top:20px; font-size:.8rem}
+  [role="tablist"] {gap:8px; background:var(--secondary-background-color);
+    border-radius:16px; padding:6px; height:auto; margin-bottom:20px}
+  [role="tab"] {flex:1; min-height:48px; height:auto; border-radius:11px;
+    padding:12px 14px; color:var(--text-color); white-space:normal}
+  [role="tab"] p {font-weight:600; font-size:.95rem}
+  [role="tab"][aria-selected="true"] {background:#17634e; color:#fff;
+    box-shadow:0 3px 8px #00000012}
+  [data-testid="stTabsHighlight"], [data-testid="stTabsBorder"], [data-testid="stTabsHighlight"], [data-testid="stTabsBorder"], [data-baseweb="tab-highlight"], [data-baseweb="tab-border"] {display:none}
+  [role="tab"]:focus-visible, button:focus-visible {
+    outline:3px solid #b78020 !important; outline-offset:3px}
+  [data-testid="stForm"] {border:1px solid #82958b55; border-radius:20px;
+    padding:24px; box-shadow:0 4px 24px #142e2006}
+  [data-testid="stMetric"] {border:1px solid #82958b55; border-radius:18px; padding:20px}
+  [data-testid="stFileUploader"] {border-radius:16px}
+  [data-testid="stFileUploaderDropzone"] {border:1px dashed #82958b; border-radius:16px; padding:24px}
+  [data-testid="stButton"] button, [data-testid="stFormSubmitButton"] button {
+    border-radius:12px; min-height:48px; padding:10px 20px; font-weight:600}
+  [data-testid="stButton"] button[kind="primary"],
+  [data-testid="stFormSubmitButton"] button[kind="primary"] {
+    background:#17634e; color:#fff; border:1px solid #17634e}
+  [data-testid="stButton"] button[kind="primary"]:hover,
+  [data-testid="stFormSubmitButton"] button[kind="primary"]:hover {background:#104b3a}
+  [data-baseweb="input"], [data-baseweb="textarea"], [data-baseweb="select"] > div {
+    border-radius:10px; min-height:46px}
+  [data-testid="stAlert"] {border-radius:14px}
+  [data-testid="stRadio"] [role="radiogroup"] {gap:12px}
+  [data-testid="stRadio"] label {padding:8px 12px; border:1px solid #82958b55; border-radius:10px}
+  .flow-note {border-left:3px solid #38936e; padding:8px 14px;
+    margin:0 0 20px; font-size:.9rem; line-height:1.65}
+  @media(max-width:640px) {
+    .block-container {padding:4.5rem 1rem 2rem}
+    .finance-hero {padding:24px 22px; border-radius:20px; margin-bottom:12px}
+    .finance-hero h1 {font-size:1.85rem}
+    .finance-hero .tag {margin-top:14px}
+    [role="tablist"] {display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:6px}
+    [role="tab"] {width:100%; padding:10px 6px; min-height:48px}
+    [data-testid="stForm"] {padding:18px 14px}
+    [data-testid="stButton"] button, [data-testid="stFormSubmitButton"] button {width:100%}
+    [data-testid="stFileUploaderDropzone"] {padding:16px; flex-wrap:wrap}
+    [data-baseweb="input"] input, textarea {font-size:16px !important}
+  }
+
+  /* Secondary navigation: distinguish the finance sections from the main app. */
+  [data-testid="stTabs"] [data-testid="stTabs"] [role="tablist"] {
+    background:transparent; padding:0; gap:6px; margin-top:4px; margin-bottom:16px}
+  [data-testid="stTabs"] [data-testid="stTabs"] [role="tab"] {
+    border:1px solid #82958b55; padding:9px 10px; min-height:44px}
+  [data-testid="stTabs"] [data-testid="stTabs"] [role="tab"][aria-selected="true"] {
+    background:var(--secondary-background-color); color:var(--text-color);
+    border:2px solid #258467; box-shadow:none}
+  [data-testid="stMetricValue"] {font-size:1.65rem; line-height:1.3; overflow:visible}
+  [data-testid="stMetricValue"] > div {white-space:normal; overflow-wrap:anywhere}
+  [data-testid="stMetricLabel"] {min-height:2.5rem; align-items:flex-start}
+  [data-testid="stMetric"] {height:100%; min-height:136px; padding:18px}
+  [data-testid="stExpander"] {border-radius:14px}
+  [data-testid="stDataFrame"] {border-radius:12px; overflow:hidden}
+  .filter-spacer {height:28px}
+  @media(max-width:640px) {
+    .filter-spacer {display:none}
+    [data-testid="stHorizontalBlock"]:has(> [data-testid="stColumn"]:nth-child(4)):not(:has(> [data-testid="stColumn"]:nth-child(5))) {
+      flex-wrap:wrap !important; gap:12px !important}
+    [data-testid="stHorizontalBlock"]:has(> [data-testid="stColumn"]:nth-child(4)):not(:has(> [data-testid="stColumn"]:nth-child(5))) > [data-testid="stColumn"] {
+      flex:1 1 calc(50% - 12px) !important; width:calc(50% - 12px) !important; min-width:0 !important}
+    [data-testid="stMetric"] {min-height:132px; padding:14px 12px}
+    [data-testid="stMetricValue"] {font-size:1.35rem}
+    [data-testid="stMetricLabel"] p {font-size:.85rem}
+    [data-testid="stTabs"] [data-testid="stTabs"] [role="tab"] {padding:8px; min-height:44px}
+  }
+
+
+  .react-aria-SelectionIndicator {display:none}
+  [data-testid="stCaptionContainer"] {opacity:1; color:var(--text-color)}
+  @media(max-width:640px) {
+    .finance-hero {padding:18px 20px}
+    .finance-hero .tag {display:none}
+    .finance-hero h1 {font-size:1.65rem}
+    [data-testid="stHorizontalBlock"]:has(> [data-testid="stColumn"]:nth-child(3)):has([data-testid="stSelectbox"]) {
+      flex-wrap:wrap !important; gap:12px !important}
+    [data-testid="stHorizontalBlock"]:has(> [data-testid="stColumn"]:nth-child(3)):has([data-testid="stSelectbox"]) > [data-testid="stColumn"] {
+      flex:1 1 calc(50% - 12px) !important; width:calc(50% - 12px) !important; min-width:0 !important}
+    [data-testid="stHorizontalBlock"]:has(> [data-testid="stColumn"]:nth-child(3)):has([data-testid="stSelectbox"]) > [data-testid="stColumn"]:nth-child(3) {
+      flex:1 1 100% !important; width:100% !important}
+  }
 </style>""", unsafe_allow_html=True)
 
-st.title("💸 Mi Panel Financiero")
-st.markdown("Gestión inteligente con IA y sincronización en tiempo real")
-st.divider()
+st.markdown("""
+<div class="finance-hero">
+  <div class="eyebrow">TU ESPACIO FINANCIERO</div>
+  <h1>Mis finanzas, en orden.</h1>
+  <p>Registra tus gastos, organiza tus pendientes y consulta tus finanzas en un solo lugar.</p>
+  <span class="tag">Registro manual · Documentos · Clasificación con IA</span>
+</div>
+""", unsafe_allow_html=True)
 
-tab1, tab2, tab3, tab4 = st.tabs(["✍️ Ingreso Manual", "📄 Subir Documento", "🚀 Ejecutar Ahora", "📊 Finanzas"])
+tab1, tab2, tab3, tab4 = st.tabs(["Registrar", "Documentos", "Pendientes", "Finanzas"])
 
 with tab1:
-    st.subheader("Agregar un gasto rápido")
+    st.subheader("Registra un gasto")
+    st.caption("Anota los detalles. Después podrás clasificarlo desde Pendientes.")
     with st.form("manual_form"):
         col1, col2 = st.columns(2)
         fecha_input = col1.date_input("Fecha", datetime.today())
@@ -376,7 +466,7 @@ with tab1:
         comercio_input = st.text_input("Comercio / Descripción")
         
         # Botón primario verde
-        submit_btn = st.form_submit_button("Guardar en Fila de Espera", type="primary")
+        submit_btn = st.form_submit_button("Guardar gasto en pendientes", type="primary")
         
         if submit_btn and comercio_input:
             fecha_formateada = fecha_input.strftime("%d/%m/%y")
@@ -389,7 +479,8 @@ with tab1:
             st.success(f"Guardado exitosamente: {comercio_input} por ${monto_limpio}")
 
 with tab2:
-    st.subheader("Extraer desde Ticket o Estado de Cuenta")
+    st.subheader("Agrega gastos desde un documento")
+    st.caption("Sube un ticket o estado de cuenta, o pega una imagen para extraer sus gastos.")
 
     st.info(
         "Puedes subir un PDF o imagen, "
@@ -405,8 +496,10 @@ with tab2:
         horizontal=True
     )
 
+    st.caption("Al analizar, los gastos encontrados se guardan automáticamente en Pendientes.")
+
     instrucciones_usuario = st.text_area(
-        "Instrucciones especiales para la IA (Opcional)",
+        "¿Qué debe tomar en cuenta la IA? (Opcional)",
         placeholder="Ej. Solo extrae los gastos del mes de octubre..."
     )
 
@@ -424,7 +517,7 @@ with tab2:
         if archivo_subido is not None:
 
             if st.button(
-                "Analizar Documento",
+                "Analizar y guardar gastos",
                 type="primary",
                 key="analizar_archivo"
             ):
@@ -519,7 +612,7 @@ with tab2:
             )
 
             if st.button(
-                "Analizar imagen pegada",
+                "Analizar y guardar gastos de la imagen",
                 type="primary",
                 key="analizar_imagen_pegada"
             ):
@@ -585,11 +678,12 @@ with tab2:
                         )
 
 with tab3:
-    st.subheader("Acomodar gastos pendientes")
-    st.write("Presiona este botón para que la IA clasifique todos los gastos de la fila de espera en un solo bloque.")
+    st.subheader("Organiza tus pendientes")
+    st.caption("El siguiente paso después de registrar o importar tus gastos.")
+    st.markdown("<div class=flow-note><strong>De pendientes a organizados.</strong><br>La IA clasifica los gastos en espera y los coloca en el mes correspondiente de tu hoja 2026.</div>", unsafe_allow_html=True)
     
     # Botón primario verde
-    if st.button("🚀 Procesar Todo Ahora", type="primary"):
+    if st.button("Clasificar gastos pendientes", type="primary"):
         with st.spinner("Despertando a la IA y acomodando celdas en el panel visual..."):
             total = procesar_pendientes()
             if total > 0:
